@@ -22,10 +22,10 @@ class DifficultyProfile:
 
 
 PROFILES = {
-    1: DifficultyProfile(4.0, 7, 9, 100),
-    2: DifficultyProfile(3.5, 5, 6, 250),
-    3: DifficultyProfile(3.0, 2, 4, 1_000),
-    4: DifficultyProfile(2.0, 0, 2, 5_000),
+    1: DifficultyProfile(4.0, 3, 3, 100),
+    2: DifficultyProfile(3.5, 2, 2, 250),
+    3: DifficultyProfile(3.0, 1, 1, 1_000),
+    4: DifficultyProfile(2.0, 0, 0, 5_000),
 }
 
 MINIMUM_GRID_SIZE = 7
@@ -181,7 +181,7 @@ def generate_puzzle(
         raise ValueError("height moet tussen 7 en 20 liggen")
     active_lexicon = lexicon or Lexicon.from_cache()
     seed_text = str(seed if seed is not None else secrets.token_hex(16))
-    rng = random.Random(f"cijfercode-v2:{seed_text}:{difficulty}:{width}x{height}")
+    rng = random.Random(f"cijfercode-v3:{seed_text}:{difficulty}:{width}x{height}")
     profile = PROFILES[difficulty]
     last_reason = "onbekend"
 

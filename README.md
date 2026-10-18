@@ -1,76 +1,89 @@
 # Cijfercode
 
-Een generator en oplosser voor Nederlandse cijfercodepuzzels. De generator
-bouwt standaard een woordraster van 17 kolommen × 20 rijen, vervangt letters door
-de codes 1–26 en selecteert hints op basis van de gemeten oplosmoeilijkheid.
+Een website voor Nederlandse cijfercodepuzzels. Bezoekers kunnen zonder account
+een puzzel genereren en spelen, of een A4-puzzelboek met meerdere
+moeilijkheidsniveaus maken en via de browser afdrukken of als PDF bewaren.
 
-## Installatie
+De website draait volledig in de browser. De generator werkt in een Web Worker,
+waardoor het scherm tijdens het zoeken naar een unieke puzzel bruikbaar blijft.
+Puzzels, voortgang en het laatst gemaakte boekje worden alleen lokaal in de
+browser bewaard.
+
+## Ontwikkelen
+
+Vereisten: Node.js 20.19+ of 22.12+ wordt aanbevolen. De huidige vastgezette
+toolchain werkt ook met Node.js 22.0.
+
+```bash
+npm install
+npm run dev
+```
+
+De belangrijkste commando's zijn:
+
+```bash
+npm test                              # unit- en generatortests
+npm run build                         # productiebuild in dist/
+npm run generate -- --difficulty 2   # één puzzel als JSON
+npm run generate -- --difficulty 4 --seed voorbeeld --output puzzel.json
+```
+
+## Website
+
+- **Spelen:** kies niveau 1–4, selecteer een cijfervak en typ een letter. Een
+  letter wordt meteen in alle vakken met hetzelfde cijfer ingevuld. De niveaus
+  starten met respectievelijk 3, 2, 1 en 0 gegeven letters.
+- **Hulp:** controleer ingevulde letters, onthul de geselecteerde letter of toon
+  na bevestiging de volledige oplossing.
+- **Boekje maken:** geef een titel en aantallen per niveau op, tot maximaal 20
+  puzzels. De uitvoer staat op moeilijkheid gesorteerd; de oplossingen staan op
+  aparte pagina's achterin.
+- **PDF:** kies `Afdrukken / PDF` en daarna `Opslaan als PDF` in het
+  afdrukvenster van de browser. De opmaak is geoptimaliseerd voor A4 staand.
+
+## Woordenlijst bijwerken
+
+`public/lexicon.json` is een vastgezette, compacte momentopname. Daardoor doet
+de productiebuild geen netwerkdownload en blijven seeds reproduceerbaar binnen
+dezelfde generator- en lexiconversie.
+
+Installeer voor een bewuste update eerst de Python-ontwikkelomgeving en haal een
+nieuwe OpenTaal-momentopname op:
 
 ```bash
 python -m pip install -e '.[dev]'
-```
-
-Download daarna een lokale, controleerbare momentopname van de Nederlandse
-woordenlijst:
-
-```bash
 python -m cijfercode words sync
+npm run lexicon:build
 ```
 
-Na een upgrade vanaf de eerdere 15×15-versie moet dit commando opnieuw worden
-uitgevoerd, omdat de cache nu ook woorden tot en met 20 letters bevat.
+Controleer en commit de gewijzigde bronmetadata en `public/lexicon.json` samen.
+Zie [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) voor bronvermelding. De
+bestaande Python-implementatie blijft voorlopig beschikbaar als referentie voor
+de datatool en regressievergelijking; de website en Node-CLI gebruiken uitsluitend
+de TypeScript-generator.
 
-## Gebruik
+## Cloudflare publiceren
+
+De statische site is ingesteld als Cloudflare Worker met assets uit `dist/`:
 
 ```bash
-python -m cijfercode generate --difficulty 2 --seed voorbeeld --output puzzel.json
+npx wrangler login
+npm run deploy
 ```
 
-Zonder `--output` wordt de JSON naar stdout geschreven. Vanuit Python:
+Voeg daarna in **Workers & Pages → cijfercode → Settings → Domains & Routes**
+het aangepaste domein `cijfercode.dckoster.com` toe. Cloudflare beheert de DNS
+voor `dckoster.com`, dus het bijbehorende record wordt vanuit deze stap gemaakt.
 
-```python
-from cijfercode import generate_puzzle
+## Oudere Python-API
 
-puzzel = generate_puzzle(difficulty=2, seed="voorbeeld")
-print(puzzel.to_dict(include_solution=True))
-```
-
-Breedte en hoogte zijn instelbaar van 7 tot en met 20. Een puzzel in het oude
-15×15-formaat maak je bijvoorbeeld zo:
+De oorspronkelijke generator blijft tijdens de webmigratie testbaar:
 
 ```bash
-python -m cijfercode generate --difficulty 2 --width 15 --height 15
+pytest -q
+python -m cijfercode generate --difficulty 2 --seed voorbeeld
 ```
 
-Met `--givens` stel je het exacte aantal vooraf gegeven letterkoppelingen in.
-Een moeilijke puzzel zonder beginletters maak je bijvoorbeeld zo:
-
-```bash
-python -m cijfercode generate --difficulty 4 --givens 0 --output puzzel.json
-```
-
-Vanuit Python is dezelfde instelling beschikbaar als `given_count=0`. Zonder
-deze optie kiest het moeilijkheidsprofiel, zoals voorheen, automatisch het
-aantal hints. Kan de generator met het gevraagde exacte aantal geen unieke
-puzzel van de gekozen moeilijkheid maken, dan eindigt hij na `max_attempts` met
-een foutmelding.
-
-Dezelfde woordenlijst, seed en moeilijkheid leveren dezelfde puzzel op. De
-JSON-uitvoer bevat zowel de speelbare puzzel als een afzonderlijk
-`solution`-onderdeel. Gebruik `--without-solution` om dat onderdeel weg te
-laten.
-
-## Woordenbronnen
-
-- Spelling en toegestane woorden: [Stichting OpenTaal][opentaal]. De download
-  wordt lokaal bewaard met bron-URL, downloadtijd en SHA-256-controlesom.
-- Gebruiksfrequentie: [wordfreq][wordfreq]. Deze score voorkomt dat makkelijke
-  puzzels hoofdzakelijk uit zeldzame woorden bestaan.
-
-OpenTaal publiceert zijn woordenlijst onder de herziene BSD-licentie en/of CC
-BY 3.0. `wordfreq`-code is Apache-2.0; de meegeleverde frequentiedata heeft
-eigen bronvermeldingsvoorwaarden. Zie de gekoppelde projecten voor de volledige
-voorwaarden.
-
-[opentaal]: https://github.com/OpenTaal/opentaal-wordlist
-[wordfreq]: https://github.com/rspeer/wordfreq
+De TypeScript-generator is leidend voor nieuwe websitepuzzels. JSON uit de
+website gebruikt `schemaVersion: 3`; oudere opgeslagen websitepuzzels worden
+bewust niet hergebruikt na deze moeilijkheidswijziging.

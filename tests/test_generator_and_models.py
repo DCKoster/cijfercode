@@ -40,6 +40,13 @@ def test_hint_counts_and_difficulty_boundaries():
     assert not _matches_difficulty(4, SolverMetrics(1, 10, 101, 2, exhausted=True))
 
 
+def test_default_hint_counts_are_exactly_rebalanced():
+    assert {
+        level: (profile.minimum_hints, profile.maximum_hints)
+        for level, profile in PROFILES.items()
+    } == {1: (3, 3), 2: (2, 2), 3: (1, 1), 4: (0, 0)}
+
+
 def test_hint_count_override_is_exact_including_zero():
     grid = (tuple(range(1, 14)), tuple(range(1, 14)))
     mapping = {code: chr(64 + code) for code in range(1, 27)}

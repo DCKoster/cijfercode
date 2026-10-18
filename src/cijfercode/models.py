@@ -69,7 +69,7 @@ class Puzzle:
 
     def to_dict(self, *, include_solution: bool = True) -> dict[str, Any]:
         result: dict[str, Any] = {
-            "schema_version": 1,
+            "schema_version": 3,
             "puzzle_id": self.puzzle_id,
             "seed": self.seed,
             "width": self.width,
