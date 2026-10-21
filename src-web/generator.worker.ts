@@ -21,6 +21,7 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
       lexicon,
       (attempt, maximum) => send({ type: "progress", requestId: message.requestId, attempt, maximum }),
       () => cancelled.has(message.requestId),
+      message.options,
     );
     if (cancelled.delete(message.requestId)) send({ type: "cancelled", requestId: message.requestId });
     else send({ type: "result", requestId: message.requestId, puzzle });

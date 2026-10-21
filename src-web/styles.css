@@ -12,7 +12,7 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; }
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 button { cursor: pointer; }
 button:focus-visible, input:focus-visible { outline: 3px solid #e59d47; outline-offset: 2px; }
 
@@ -32,6 +32,11 @@ main { width: min(1120px, calc(100% - 32px)); margin: 0 auto; padding: 44px 0 80
 fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
 legend, .field { display: block; margin-bottom: 10px; font: 700 .85rem system-ui, sans-serif; }
 .difficulty { flex: 1; }
+.generation-settings { display: grid; gap: 9px; min-width: 190px; }
+.topic-picker { display: grid; gap: 10px; min-width: 145px; font: 700 .85rem system-ui, sans-serif; }
+.topic-picker select { padding: 11px 32px 11px 10px; border: 1px solid var(--line); border-radius: 2px; color: var(--ink); background: white; }
+.check-option { display: flex; align-items: center; gap: 8px; font: .82rem system-ui, sans-serif; cursor: pointer; }
+.check-option input { width: 1rem; height: 1rem; accent-color: var(--green); }
 .difficulty-options { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .difficulty-options label { padding: 12px; border: 1px solid var(--line); border-radius: 3px; cursor: pointer; }
 .difficulty-options label.selected { color: white; border-color: var(--green); background: var(--green); }
@@ -46,28 +51,34 @@ button:disabled { cursor: default; opacity: .6; }
 .success { border-color: var(--green); background: #e0eee8; }
 .muted { color: #655f56; font: .9rem system-ui, sans-serif; }
 
-.player { margin-top: 32px; }
+.player { margin-top: 32px; padding: clamp(18px, 3vw, 30px); }
 .puzzle-heading { display: flex; align-items: start; justify-content: space-between; }
 .puzzle-heading h2, .booklet h2 { margin: 0 0 8px; font-size: 2rem; font-weight: 500; }
 .instructions { margin: 5px 0 24px; color: #5b5952; }
-.puzzle-grid { --columns: 17; display: grid; grid-template-columns: repeat(var(--columns), minmax(0, 1fr)); width: min(100%, 760px); margin: 20px auto; border: 2px solid var(--ink); background: var(--ink); gap: 1px; aspect-ratio: 17 / 20; }
+.play-area { display: grid; grid-template-columns: minmax(340px, 680px) minmax(280px, 1fr); align-items: start; gap: clamp(20px, 3vw, 38px); }
+.puzzle-grid { --columns: 17; display: grid; grid-template-columns: repeat(var(--columns), minmax(0, 1fr)); width: min(100%, calc((100vh - 235px) * .85), 680px); margin: 0 auto; border: 2px solid var(--ink); background: var(--ink); gap: 1px; aspect-ratio: 17 / 20; }
 .puzzle-grid .cell { position: relative; min-width: 0; padding: 0; border: 0; border-radius: 0; color: var(--ink); background: white; aspect-ratio: 1; }
 .puzzle-grid .cell.block { background: var(--ink); }
 .puzzle-grid button.cell:disabled { opacity: 1; }
-.puzzle-grid .cell.selected-code { background: #f7dfae; }
+.puzzle-grid .cell.selected-code { z-index: 1; background: #f7dfae; box-shadow: inset 0 0 0 3px var(--accent); }
 .puzzle-grid .cell.given { background: #dde9e2; }
 .puzzle-grid .cell.incorrect { color: #a7271d; background: #fbd9d5; }
 .letter { display: grid; place-items: center; height: 75%; font-size: clamp(.68rem, 2vw, 1.15rem); font-weight: 700; }
 .code { position: absolute; right: 2px; bottom: 0; font: clamp(.42rem, 1vw, .64rem) system-ui, sans-serif; opacity: .68; }
-.alphabet { display: grid; grid-template-columns: repeat(13, 1fr); gap: 4px; max-width: 760px; margin: 18px auto; }
+.player-tools { min-width: 0; }
+.player-feedback { min-height: 62px; margin-bottom: 12px; }
+.player-feedback > :first-child { margin-top: 0; }
+.alphabet { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 0; }
 .alphabet span { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); text-align: center; }
 .alphabet strong, .alphabet small { padding: 5px 2px; }
 .alphabet small { border-left: 1px solid var(--line); font: .76rem system-ui, sans-serif; }
 .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+.player-tools .actions button { flex: 1 1 130px; }
 
 .booklet { max-width: 780px; margin: 0 auto; }
-.field input { display: block; width: 100%; margin-top: 8px; padding: 12px; border: 1px solid var(--line); background: white; }
+.field input, .field select { display: block; width: 100%; margin-top: 8px; padding: 12px; border: 1px solid var(--line); background: white; }
 .booklet fieldset { margin-top: 24px; }
+.booklet-options { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 16px 0; }
 .count-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
 .count-grid label { font: .83rem system-ui, sans-serif; }
 .count-grid input { display: block; width: 100%; margin-top: 6px; padding: 10px; border: 1px solid var(--line); }
@@ -81,9 +92,19 @@ button:disabled { cursor: default; opacity: .6; }
   main { padding-top: 28px; }
   .generator { display: block; }
   .generator > button { width: 100%; margin-top: 16px; }
+  .topic-picker { margin-top: 16px; }
   .difficulty-options, .count-grid { grid-template-columns: repeat(2, 1fr); }
+  .play-area { display: block; }
+  .player-tools { margin-top: 18px; }
+  .player-feedback { min-height: 0; }
   .alphabet { grid-template-columns: repeat(7, 1fr); }
   .puzzle-grid { width: calc(100vw - 34px); }
+}
+
+@media (min-width: 701px) and (max-height: 760px) {
+  main { padding-top: 24px; }
+  .player { margin-top: 22px; }
+  .instructions { margin-bottom: 14px; }
 }
 
 @page { size: A4 portrait; margin: 12mm; }

@@ -1,9 +1,10 @@
-import type { Cell, Difficulty, Entry, LetterCell, LexiconData, PuzzleDocument, SolverMetrics } from "../types";
+import { normalizeTheme, type Cell, type Difficulty, type Entry, type GenerationOptions, type LetterCell, type LexiconData, type PuzzleDocument, type SolverMetrics } from "../types";
 import { SeededRandom } from "./random";
 
 const WIDTH = 17 as const;
 const HEIGHT = 20 as const;
 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const DEFAULT_OPTIONS: GenerationOptions = { theme: "general", requireEveryLetter: false, includeProperNames: false };
 const PROFILES: Record<Difficulty, { minimumScore: number; hints: number; maxNodes: number }> = {
   1: { minimumScore: 4, hints: 3, maxNodes: 100 },
   2: { minimumScore: 3.5, hints: 2, maxNodes: 250 },
@@ -18,10 +19,17 @@ function adjustedScore(base: number, length: number): number {
   return Math.max(base - 1.2, base - 0.12 * Math.max(0, length - 5));
 }
 
-function candidates(lexicon: LexiconData, length: number, minimumScore: number): string[] {
+function wordSource(lexicon: LexiconData, options: GenerationOptions): Record<string, Array<[string, number]>> {
+  if (options.theme === "animals_familiar") return lexicon.themes.animals.familiarWords;
+  return options.theme === "animals_all" ? lexicon.themes.animals.words : lexicon.words;
+}
+
+export function candidates(lexicon: LexiconData, length: number, minimumScore: number, options: GenerationOptions): string[] {
   const threshold = adjustedScore(minimumScore, length);
-  return (lexicon.words[String(length)] ?? [])
-    .filter(([, score]) => score >= threshold)
+  const properNames = new Set(lexicon.properNames);
+  return (wordSource(lexicon, options)[String(length)] ?? [])
+    .filter(([, score]) => options.theme !== "general" || score >= threshold)
+    .filter(([word]) => options.theme !== "general" || options.includeProperNames || !properNames.has(word))
     .map(([word]) => word);
 }
 
@@ -30,12 +38,12 @@ function cells(entry: Pick<Entry, "row" | "column" | "direction" | "length">): A
   return Array.from({ length: entry.length }, (_, offset) => [entry.row + dr * offset, entry.column + dc * offset]);
 }
 
-function generateFill(lexicon: LexiconData, random: SeededRandom, minimumScore: number): FillResult | null {
+function generateFill(lexicon: LexiconData, random: SeededRandom, minimumScore: number, options: GenerationOptions): FillResult | null {
   const pool: string[] = [];
   const scores = new Map<string, number>();
   for (let length = 3; length <= 20; length += 1) {
-    for (const [word, score] of (lexicon.words[String(length)] ?? [])) scores.set(word, score);
-    pool.push(...candidates(lexicon, length, minimumScore).slice(0, 2500));
+    for (const [word, score] of (wordSource(lexicon, options)[String(length)] ?? [])) scores.set(word, score);
+    pool.push(...candidates(lexicon, length, minimumScore, options).slice(0, 2500));
   }
   if (!pool.length) return null;
   const ranking = new Map(pool.map((word) => [word, (scores.get(word) ?? 0) + random.next() * 0.35]));
@@ -65,6 +73,8 @@ function generateFill(lexicon: LexiconData, random: SeededRandom, minimumScore: 
   const first: Entry = { row: Math.floor(HEIGHT / 2), column: Math.floor((WIDTH - firstWord.length) / 2), direction: "across", length: firstWord.length, word: firstWord };
   const entries = [first];
   const used = new Set([firstWord]);
+  const missingLetters = new Set(LETTERS);
+  firstWord.split("").forEach((letter) => missingLetters.delete(letter));
   const letters = new Map<string, string>();
   const directions = new Map<string, Set<string>>();
   const keyOf = (row: number, column: number) => `${row},${column}`;
@@ -83,9 +93,15 @@ function generateFill(lexicon: LexiconData, random: SeededRandom, minimumScore: 
     }
     if (!anchors.length) break;
     const [[anchorRow, anchorColumn], direction] = anchors[random.integer(anchors.length)];
-    const options = index.get(`${direction}:${letters.get(keyOf(anchorRow, anchorColumn))}`) ?? [];
-    if (!options.length) { misses += 1; continue; }
-    const [word, crossing] = options[random.integer(options.length)];
+    const indexedOptions = index.get(`${direction}:${letters.get(keyOf(anchorRow, anchorColumn))}`) ?? [];
+    if (!indexedOptions.length) { misses += 1; continue; }
+    let selectable = indexedOptions;
+    if (options.requireEveryLetter && missingLetters.size) {
+      const coverage = (word: string) => new Set(word.split("").filter((letter) => missingLetters.has(letter))).size;
+      const maximumCoverage = indexedOptions.reduce((maximum, [word]) => Math.max(maximum, coverage(word)), 0);
+      if (maximumCoverage > 0) selectable = indexedOptions.filter(([word]) => coverage(word) === maximumCoverage);
+    }
+    const [word, crossing] = selectable[random.integer(selectable.length)];
     if (used.has(word)) { misses += 1; continue; }
     const [dr, dc] = direction === "across" ? [0, 1] : [1, 0];
     const row = anchorRow - dr * crossing;
@@ -114,13 +130,14 @@ function generateFill(lexicon: LexiconData, random: SeededRandom, minimumScore: 
     if (!valid || crossings === 0) { misses += 1; continue; }
     const entry: Entry = { row, column, direction, length: word.length, word };
     entries.push(entry); used.add(word);
+    word.split("").forEach((letter) => missingLetters.delete(letter));
     for (const [position, [cellRow, cellColumn]] of cells(entry).entries()) {
       const key = keyOf(cellRow, cellColumn); letters.set(key, word[position]);
       const present = directions.get(key) ?? new Set<string>(); present.add(direction); directions.set(key, present);
     }
     misses = 0;
   }
-  if (entries.length < 25) return null;
+  if (entries.length < (options.theme !== "general" ? 18 : 25) || (options.requireEveryLetter && missingLetters.size > 0)) return null;
   const grid = Array.from({ length: HEIGHT }, (_, row) => Array.from({ length: WIDTH }, (_, column) => letters.get(keyOf(row, column)) ?? null));
   return { grid, entries };
 }
@@ -161,9 +178,9 @@ function compatible(codes: number[], word: string, mapping: Map<number, string>,
   return true;
 }
 
-function solve(grid: Cell[][], givens: Record<number, string>, lexicon: LexiconData, minimumScore: number, maxNodes: number): SolveResult {
+function solve(grid: Cell[][], givens: Record<number, string>, lexicon: LexiconData, minimumScore: number, maxNodes: number, options: GenerationOptions): SolveResult {
   const entries = extractEntries(grid);
-  const domains = entries.map(({ codes }) => candidates(lexicon, codes.length, minimumScore).filter((word) => pattern(word.split("")).join() === pattern(codes).join()));
+  const domains = entries.map(({ codes }) => candidates(lexicon, codes.length, minimumScore, options).filter((word) => pattern(word.split("")).join() === pattern(codes).join()));
   const solutions: LetterCell[][][] = [];
   const metrics: SolverMetrics = { solutions: 0, propagationSteps: 0, searchNodes: 0, maxDepth: 0, exhausted: false };
   const initial = new Map<number, string>(Object.entries(givens).map(([code, letter]) => [Number(code), letter]));
@@ -211,23 +228,29 @@ function hashId(value: string): string {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
-function matchesDifficulty(difficulty: Difficulty, metrics: SolverMetrics): boolean {
+function matchesDifficulty(difficulty: Difficulty, metrics: SolverMetrics, options: GenerationOptions): boolean {
   if (metrics.solutions !== 1 || metrics.exhausted) return false;
+  if (options.theme !== "general") return metrics.searchNodes <= 5000;
   if (difficulty === 1) return metrics.searchNodes <= 20 && metrics.maxDepth <= 1;
   if (difficulty === 2) return metrics.searchNodes <= 100 && metrics.maxDepth <= 2;
   if (difficulty === 3) return metrics.searchNodes <= 1000;
   return metrics.searchNodes <= 5000;
 }
 
-export async function generatePuzzle(difficulty: Difficulty, seed: string, lexicon: LexiconData, onProgress?: (attempt: number, maximum: number) => void, cancelled?: () => boolean): Promise<PuzzleDocument> {
+export async function generatePuzzle(difficulty: Difficulty, seed: string, lexicon: LexiconData, onProgress?: (attempt: number, maximum: number) => void, cancelled?: () => boolean, requestedOptions: Partial<GenerationOptions> = {}): Promise<PuzzleDocument> {
+  const options = { ...DEFAULT_OPTIONS, ...requestedOptions, theme: normalizeTheme(requestedOptions.theme) };
+  if (options.theme === "animals_familiar" && options.requireEveryLetter) {
+    throw new Error("Bekende dieren kan niet met alle 26 letters worden gecombineerd, omdat deze woordenlijst geen Q bevat.");
+  }
   const profile = PROFILES[difficulty];
   const maximum = 100;
-  const random = new SeededRandom(`cijfercode-web-2:${seed}:${difficulty}`);
+  const optionKey = `${options.theme}:${Number(options.requireEveryLetter)}:${Number(options.includeProperNames)}`;
+  const random = new SeededRandom(`cijfercode-web-3:${seed}:${difficulty}:${optionKey}`);
   for (let attempt = 1; attempt <= maximum; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 0));
     if (cancelled?.()) throw new Error("Geannuleerd");
     onProgress?.(attempt, maximum);
-    const fill = generateFill(lexicon, random, profile.minimumScore);
+    const fill = generateFill(lexicon, random, profile.minimumScore, options);
     if (!fill) continue;
     const shuffled = random.shuffle(LETTERS.split(""));
     const codeToLetter: Record<number, string> = Object.fromEntries(shuffled.map((letter, index) => [index + 1, letter]));
@@ -237,14 +260,17 @@ export async function generatePuzzle(difficulty: Difficulty, seed: string, lexic
     grid.flat().forEach((code) => { if (code !== null) frequencies.set(code, (frequencies.get(code) ?? 0) + 1); });
     const usedCodes = Array.from(frequencies).sort((a, b) => b[1] + random.next() * 3 - a[1] - random.next() * 3).map(([code]) => code);
     const givens = Object.fromEntries(usedCodes.slice(0, profile.hints).map((code) => [code, codeToLetter[code]]));
-    const solved = solve(grid, givens, lexicon, profile.minimumScore, profile.maxNodes);
-    if (!matchesDifficulty(difficulty, solved.metrics)) continue;
+    const solved = solve(grid, givens, lexicon, profile.minimumScore, options.theme !== "general" ? 5000 : profile.maxNodes, options);
+    if (!matchesDifficulty(difficulty, solved.metrics, options)) continue;
     return {
-      schemaVersion: 3, generatorVersion: "web-2", lexiconVersion: lexicon.version,
-      puzzleId: hashId(`${seed}:${difficulty}:${JSON.stringify(grid)}:${JSON.stringify(givens)}`), seed, difficulty,
+      schemaVersion: 4, generatorVersion: "web-3", lexiconVersion: lexicon.version,
+      puzzleId: hashId(`${seed}:${difficulty}:${optionKey}:${JSON.stringify(grid)}:${JSON.stringify(givens)}`), seed, difficulty,
+      theme: options.theme, requireEveryLetter: options.requireEveryLetter, includeProperNames: options.includeProperNames,
       width: WIDTH, height: HEIGHT, grid, givens, measured: solved.metrics,
       solution: { grid: fill.grid, codeToLetter, entries: fill.entries },
     };
   }
-  throw new Error("Er kon geen unieke puzzel worden gemaakt. Probeer het opnieuw.");
+  const guarantee = options.requireEveryLetter ? " met alle 26 letters" : "";
+  const subject = options.theme !== "general" ? "dierenpuzzel" : "puzzel";
+  throw new Error(`Er kon geen unieke ${subject}${guarantee} worden gemaakt. Probeer het opnieuw.`);
 }

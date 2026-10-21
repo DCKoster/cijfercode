@@ -1,11 +1,13 @@
-const PREFIX = "cijfercode:v3:";
+const PREFIX = "cijfercode:v4:";
 const MIGRATION_MARKER = `${PREFIX}migrated`;
 
 export function migrateLegacyStorage(): void {
   try {
     if (localStorage.getItem(MIGRATION_MARKER)) return;
-    localStorage.removeItem("cijfercode:v2:player");
-    localStorage.removeItem("cijfercode:v2:booklet");
+    for (const version of ["v2", "v3"]) {
+      localStorage.removeItem(`cijfercode:${version}:player`);
+      localStorage.removeItem(`cijfercode:${version}:booklet`);
+    }
     localStorage.setItem(MIGRATION_MARKER, "true");
   } catch { /* Storage can be unavailable in private browsing modes. */ }
 }

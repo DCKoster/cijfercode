@@ -14,3 +14,9 @@ Word ordering and difficulty filtering use frequency estimates generated with
 `wordfreq`. Copyright © 2022 Robyn Speer. `wordfreq` is distributed under the
 Apache License 2.0; its source-specific data acknowledgements are documented at
 <https://github.com/rspeer/wordfreq/blob/master/NOTICE.md>.
+
+## Nederlands Soortenregister
+
+Het dierenthema bevat Nederlandse volksnamen uit de Checklist Dutch Species
+Register van Naturalis Biodiversity Center, beschikbaar via GBIF onder CC BY
+4.0 (dataset <https://doi.org/10.15468/rjdpzy>).

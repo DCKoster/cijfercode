@@ -1,4 +1,4 @@
-import type { Difficulty, PuzzleDocument, WorkerRequest, WorkerResponse } from "../types";
+import type { Difficulty, GenerationOptions, PuzzleDocument, WorkerRequest, WorkerResponse } from "../types";
 
 let worker: Worker | undefined;
 const pending = new Map<string, {
@@ -24,7 +24,7 @@ function getWorker(): Worker {
 
 export function requestPuzzle(
   difficulty: Difficulty,
-  options: { seed?: string; signal?: AbortSignal; onProgress?: (attempt: number, maximum: number) => void } = {},
+  options: Partial<GenerationOptions> & { seed?: string; signal?: AbortSignal; onProgress?: (attempt: number, maximum: number) => void } = {},
 ): Promise<PuzzleDocument> {
   const requestId = crypto.randomUUID();
   const seed = options.seed ?? crypto.randomUUID();
@@ -34,7 +34,14 @@ export function requestPuzzle(
       const message: WorkerRequest = { type: "cancel", requestId };
       getWorker().postMessage(message);
     }, { once: true });
-    const message: WorkerRequest = { type: "generate", requestId, difficulty, seed };
+    const message: WorkerRequest = {
+      type: "generate", requestId, difficulty, seed,
+      options: {
+        theme: options.theme ?? "general",
+        requireEveryLetter: options.requireEveryLetter ?? false,
+        includeProperNames: options.includeProperNames ?? false,
+      },
+    };
     getWorker().postMessage(message);
   });
 }

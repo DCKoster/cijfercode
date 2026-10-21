@@ -5,7 +5,8 @@ import { PrintDocument } from "./PrintDocument";
 import { PrintablePuzzleGrid } from "./PrintablePuzzleGrid";
 
 const puzzle: PuzzleDocument = {
-  schemaVersion: 3, generatorVersion: "web-2", lexiconVersion: "test", puzzleId: "abc", seed: "seed", difficulty: 2,
+  schemaVersion: 4, generatorVersion: "web-3", lexiconVersion: "test", puzzleId: "abc", seed: "seed", difficulty: 2,
+  theme: "general", requireEveryLetter: false, includeProperNames: false,
   width: 17, height: 20,
   grid: Array.from({ length: 20 }, () => Array.from({ length: 17 }, () => null)),
   givens: {}, measured: { solutions: 1, propagationSteps: 1, searchNodes: 0, maxDepth: 0, exhausted: false },
