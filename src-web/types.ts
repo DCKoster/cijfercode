@@ -8,11 +8,11 @@ export function normalizeTheme(theme: StoredTheme | string | undefined): Theme {
   return "general";
 }
 
-export function themeLabel(theme: StoredTheme | string | undefined): string | null {
+export function themeLabel(theme: StoredTheme | string | undefined): string {
   const normalized = normalizeTheme(theme);
   if (normalized === "animals_familiar") return "Bekende dieren";
   if (normalized === "animals_all") return "Alle dieren";
-  return null;
+  return "Geen thema";
 }
 export interface GenerationOptions {
   theme: Theme;
@@ -76,9 +76,18 @@ export interface LexiconData {
   };
 }
 
+export interface BookletThemeSpec {
+  theme: Theme;
+  counts: Record<Difficulty, number>;
+  requireEveryLetter: boolean;
+  includeProperNames: boolean;
+}
+
 export interface BookletSpec {
   title: string;
-  counts: Record<Difficulty, number>;
+  themes?: BookletThemeSpec[];
+  // Legacy v4 fields. Kept optional so existing browser storage can be upgraded.
+  counts?: Record<Difficulty, number>;
   theme?: Theme;
   requireEveryLetter?: boolean;
   includeProperNames?: boolean;

@@ -41,9 +41,10 @@ npm run generate -- --difficulty 2 --theme animals_all --all-letters
   Q bevat.
 - **Hulp:** controleer ingevulde letters, onthul de geselecteerde letter of toon
   na bevestiging de volledige oplossing.
-- **Boekje maken:** geef een titel en aantallen per niveau op, tot maximaal 20
-  puzzels, met of zonder dierenthema. De uitvoer staat op moeilijkheid
-  gesorteerd; de oplossingen staan op aparte pagina's achterin.
+- **Boekje maken:** geef een titel en per thema aantallen voor niveau 1–4 op, tot
+  maximaal 50 puzzels. Thema's kunnen in één boekje worden gemengd. De uitvoer
+  staat op moeilijkheid gesorteerd; de oplossingen staan op aparte pagina's
+  achterin.
 - **PDF:** kies `Afdrukken / PDF` en daarna `Opslaan als PDF` in het
   afdrukvenster van de browser. De opmaak is geoptimaliseerd voor A4 staand.
 

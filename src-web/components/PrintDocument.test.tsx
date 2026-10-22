@@ -15,7 +15,7 @@ const puzzle: PuzzleDocument = {
 
 describe("PrintDocument", () => {
   it("puts booklet solutions after every puzzle", () => {
-    render(<PrintDocument job={{ title: "Familieboek", cover: true, puzzles: [puzzle, { ...puzzle, puzzleId: "def", difficulty: 4 }] }} />);
+    render(<PrintDocument job={{ title: "Familieboek", cover: true, puzzles: [puzzle, { ...puzzle, puzzleId: "def", difficulty: 4, theme: "animals_all" }] }} />);
     const pages = document.querySelectorAll(".print-page");
     expect(pages).toHaveLength(4);
     expect(pages[0]).toHaveClass("cover");
@@ -23,6 +23,8 @@ describe("PrintDocument", () => {
     expect(pages[2]).toHaveClass("puzzle-sheet");
     expect(pages[3]).toHaveClass("answers");
     expect(screen.getByText("Familieboek")).toBeInTheDocument();
+    expect(screen.getAllByText(/Niveau 2.*Geen thema/)).toHaveLength(2);
+    expect(screen.getAllByText(/Niveau 4.*Alle dieren/)).toHaveLength(2);
   });
 
   it("draws every cell with explicit SVG geometry", () => {

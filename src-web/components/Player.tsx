@@ -64,7 +64,7 @@ export function Player({ puzzle, saved, onSave, onPrint }: { puzzle: PuzzleDocum
   };
 
   return <section className="player card">
-    <div className="puzzle-heading"><div><p className="eyebrow">Niveau {puzzle.difficulty}{themeLabel(puzzle.theme) ? ` · ${themeLabel(puzzle.theme)}` : ""}{puzzle.requireEveryLetter ? " · Volledig alfabet" : ""}</p><h2>Puzzel {puzzle.puzzleId}</h2></div><button className="text-button" onClick={onPrint}>Afdrukken</button></div>
+    <div className="puzzle-heading"><p className="eyebrow">Niveau {puzzle.difficulty} · {themeLabel(puzzle.theme)}{puzzle.requireEveryLetter ? " · Volledig alfabet" : ""}</p><button className="text-button" onClick={onPrint}>Afdrukken</button></div>
     <p className="instructions">Selecteer een vakje en typ een letter. De letter verschijnt automatisch bij dezelfde code.</p>
     <div className="play-area">
       <PuzzleGrid puzzle={puzzle} mapping={mapping} selected={selected} incorrect={incorrect} onSelect={setSelected} />

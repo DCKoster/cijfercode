@@ -25,6 +25,14 @@ function puzzle(): PuzzleDocument {
 }
 
 describe("Player", () => {
+  it("shows level and theme without exposing the internal puzzle id", () => {
+    const themed = { ...puzzle(), theme: "animals_familiar" as const };
+    render(<Player puzzle={themed} onSave={vi.fn()} onPrint={vi.fn()} />);
+
+    expect(screen.getByText("Niveau 2 · Bekende dieren")).toBeInTheDocument();
+    expect(screen.queryByText(/Puzzel test/)).not.toBeInTheDocument();
+  });
+
   it("clears only the selected code and keeps other error feedback", () => {
     const { container } = render(<Player puzzle={puzzle()} saved={{ puzzleId: "test", mapping: { 1: "B", 2: "D" } }} onSave={vi.fn()} onPrint={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Controleren" }));

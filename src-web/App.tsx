@@ -51,9 +51,9 @@ export default function App() {
           <section className="generator card">
             <DifficultyPicker value={difficulty} onChange={setDifficulty} disabled={busy} />
             <div className="generation-settings">
-              <label className="topic-picker">Onderwerp<select value={theme} onChange={(event) => { const next = event.target.value as Theme; setTheme(next); if (next === "animals_familiar") setRequireEveryLetter(false); }} disabled={busy}><option value="general">Geen thema</option><option value="animals_familiar">Bekende dieren</option><option value="animals_all">Alle dieren</option></select></label>
+              <label className="topic-picker">Onderwerp<select value={theme} onChange={(event) => { const next = event.target.value as Theme; setTheme(next); if (next === "animals_familiar") setRequireEveryLetter(false); if (next !== "general") setIncludeProperNames(false); }} disabled={busy}><option value="general">Geen thema</option><option value="animals_familiar">Bekende dieren</option><option value="animals_all">Alle dieren</option></select></label>
               <label className="check-option" title={theme === "animals_familiar" ? "De lijst met bekende dieren bevat geen Q." : undefined}><input type="checkbox" checked={requireEveryLetter} onChange={(event) => setRequireEveryLetter(event.target.checked)} disabled={busy || theme === "animals_familiar"} />Alle 26 letters gebruiken</label>
-              <label className="check-option"><input type="checkbox" checked={includeProperNames} onChange={(event) => setIncludeProperNames(event.target.checked)} disabled={busy || theme !== "general"} />Eigennamen toestaan</label>
+              <label className="check-option" title={theme !== "general" ? "Dierenpuzzels gebruiken uitsluitend diernamen." : undefined}><input type="checkbox" checked={includeProperNames} onChange={(event) => setIncludeProperNames(event.target.checked)} disabled={busy || theme !== "general"} />Eigennamen toestaan</label>
             </div>
             <button onClick={generate} disabled={busy}>{busy ? "Bezig met genereren…" : "Nieuwe puzzel"}</button>{status && <p className="status" role="status">{status}</p>}
           </section>
