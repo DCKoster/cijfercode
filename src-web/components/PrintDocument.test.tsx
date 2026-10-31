@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { PuzzleDocument } from "../types";
 import { PrintDocument } from "./PrintDocument";
@@ -23,6 +23,10 @@ describe("PrintDocument", () => {
     expect(pages[2]).toHaveClass("puzzle-sheet");
     expect(pages[3]).toHaveClass("answers");
     expect(screen.getByText("Familieboek")).toBeInTheDocument();
+    expect(within(pages[0] as HTMLElement).getByText("2")).toBeInTheDocument();
+    expect(within(pages[0] as HTMLElement).getByText("Niveaus 2, 4")).toBeInTheDocument();
+    expect(within(pages[0] as HTMLElement).getByText("Geen thema")).toBeInTheDocument();
+    expect(within(pages[0] as HTMLElement).getByText("Alle dieren")).toBeInTheDocument();
     expect(screen.getAllByText(/Niveau 2.*Geen thema/)).toHaveLength(2);
     expect(screen.getAllByText(/Niveau 4.*Alle dieren/)).toHaveLength(2);
   });

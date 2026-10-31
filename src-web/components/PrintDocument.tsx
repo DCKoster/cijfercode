@@ -7,8 +7,18 @@ export interface PrintJob { title?: string; puzzles: PuzzleDocument[]; cover: bo
 export function PrintDocument({ job }: { job: PrintJob | null }) {
   if (!job) return null;
   const answerPages = Array.from({ length: Math.ceil(job.puzzles.length / 4) }, (_, page) => job.puzzles.slice(page * 4, page * 4 + 4));
+  const levels = Array.from(new Set(job.puzzles.map((puzzle) => puzzle.difficulty))).sort();
+  const themes = Array.from(new Set(job.puzzles.map((puzzle) => themeLabel(puzzle.theme))));
   return <div className="print-document">
-    {job.cover && <section className="print-page cover"><div><p>Cijfercode</p><h1>{job.title || "Mijn puzzelboek"}</h1><span>{job.puzzles.length} Nederlandse cijfercodepuzzels</span></div></section>}
+    {job.cover && <section className="print-page cover">
+      <div className="cover-rail" aria-hidden="true">
+        <span className="cover-edition">PUZZELBOEK</span>
+      </div>
+      <div className="cover-content">
+        <p className="cover-kicker">Cijfercode</p>
+        <h1>{job.title || "Mijn puzzelboek"}</h1>
+      </div>
+    </section>}
     {job.puzzles.map((puzzle, index) => <section className="print-page puzzle-sheet" key={puzzle.puzzleId}>
       <header><div><p>Cijfercode</p><h1>Puzzel {index + 1}</h1></div><span>Niveau {puzzle.difficulty} · {difficultyName(puzzle.difficulty)} · {themeLabel(puzzle.theme)}{puzzle.requireEveryLetter ? " · A–Z" : ""}</span></header>
       <PrintablePuzzleGrid puzzle={puzzle} />
