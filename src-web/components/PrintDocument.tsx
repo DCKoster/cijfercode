@@ -7,16 +7,23 @@ export interface PrintJob { title?: string; puzzles: PuzzleDocument[]; cover: bo
 export function PrintDocument({ job }: { job: PrintJob | null }) {
   if (!job) return null;
   const answerPages = Array.from({ length: Math.ceil(job.puzzles.length / 4) }, (_, page) => job.puzzles.slice(page * 4, page * 4 + 4));
-  const levels = Array.from(new Set(job.puzzles.map((puzzle) => puzzle.difficulty))).sort();
+  const levels = Array.from(new Set(job.puzzles.map((puzzle) => puzzle.difficulty))).sort((a, b) => a - b);
   const themes = Array.from(new Set(job.puzzles.map((puzzle) => themeLabel(puzzle.theme))));
   return <div className="print-document">
     {job.cover && <section className="print-page cover">
       <div className="cover-rail" aria-hidden="true">
+        <div className="cover-code-grid">{[3, 9, 10, 6, 5, 18].map((code) => <span key={code}>{code}</span>)}</div>
         <span className="cover-edition">PUZZELBOEK</span>
       </div>
       <div className="cover-content">
         <p className="cover-kicker">Cijfercode</p>
         <h1>{job.title || "Mijn puzzelboek"}</h1>
+        <p className="cover-intro">Nederlandse woordpuzzels waarin elk cijfer voor een letter staat.</p>
+        <div className="cover-meta">
+          <span><strong>{job.puzzles.length}</strong>{job.puzzles.length === 1 ? "puzzel" : "puzzels"}</span>
+          <span><strong>{levels.length === 1 ? `Niveau ${levels[0]}` : `Niveaus ${levels.join(", ")}`}</strong>{levels.length === 1 ? "moeilijkheid" : "moeilijkheden"}</span>
+        </div>
+        <div className="cover-themes" aria-label="Thema's">{themes.map((theme) => <span key={theme}>{theme}</span>)}</div>
       </div>
     </section>}
     {job.puzzles.map((puzzle, index) => <section className="print-page puzzle-sheet" key={puzzle.puzzleId}>

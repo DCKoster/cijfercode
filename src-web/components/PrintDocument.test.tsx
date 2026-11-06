@@ -31,6 +31,51 @@ describe("PrintDocument", () => {
     expect(screen.getAllByText(/Niveau 4.*Alle dieren/)).toHaveLength(2);
   });
 
+  it("shows singular cover metadata for one puzzle", () => {
+    const { container } = render(<PrintDocument job={{ cover: true, puzzles: [puzzle] }} />);
+    const cover = container.querySelector(".cover") as HTMLElement;
+
+    expect(within(cover).getByText("1")).toBeInTheDocument();
+    expect(within(cover).getByText("puzzel")).toBeInTheDocument();
+    expect(within(cover).getByText("Niveau 2")).toBeInTheDocument();
+    expect(within(cover).getByText("Geen thema")).toBeInTheDocument();
+  });
+
+  it("deduplicates repeated levels and themes on the cover", () => {
+    const { container } = render(<PrintDocument job={{ cover: true, puzzles: [
+      puzzle,
+      { ...puzzle, puzzleId: "def" },
+      { ...puzzle, puzzleId: "ghi" },
+    ] }} />);
+    const cover = container.querySelector(".cover") as HTMLElement;
+
+    expect(within(cover).getByText("Niveau 2")).toBeInTheDocument();
+    expect(within(cover).getAllByText("Geen thema")).toHaveLength(1);
+  });
+
+  it("orders multiple levels numerically on the cover", () => {
+    const { container } = render(<PrintDocument job={{ cover: true, puzzles: [
+      { ...puzzle, puzzleId: "level-4", difficulty: 4 },
+      { ...puzzle, puzzleId: "level-1", difficulty: 1 },
+      { ...puzzle, puzzleId: "level-3", difficulty: 3 },
+      { ...puzzle, puzzleId: "level-2", difficulty: 2 },
+      { ...puzzle, puzzleId: "level-1-again", difficulty: 1 },
+    ] }} />);
+    const cover = container.querySelector(".cover") as HTMLElement;
+
+    expect(within(cover).getByText("Niveaus 1, 2, 3, 4")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["custom", "Familieboek", "Familieboek"],
+    ["default", undefined, "Mijn puzzelboek"],
+  ])("renders the %s cover title", (_variant, title, expected) => {
+    const { container } = render(<PrintDocument job={{ title, cover: true, puzzles: [puzzle] }} />);
+    const cover = container.querySelector(".cover") as HTMLElement;
+
+    expect(within(cover).getByRole("heading", { name: expected })).toBeInTheDocument();
+  });
+
   it("draws every cell with explicit SVG geometry", () => {
     const grid = puzzle.grid.map((row) => [...row]);
     grid[0][0] = 1;

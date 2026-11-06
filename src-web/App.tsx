@@ -60,7 +60,13 @@ export default function App() {
           {puzzle && <Player key={puzzle.puzzleId} puzzle={puzzle} saved={playerState} onSave={savePlayer} onPrint={() => print({ puzzles: [puzzle], cover: false })} />}
         </> : <BookletBuilder initial={savedBooklet} onSave={(value) => storeValue("booklet", value)} onPrint={(title, puzzles) => print({ title, puzzles, cover: true })} />}
       </main>
-      <footer className="site-footer">Woordenlijst: Stichting OpenTaal · <a href="https://github.com/DCKoster/cijfercode">Broncode en licenties</a></footer>
+      <footer className="site-footer">
+        <div className="family-marker">
+          <span className="family-name"><span className="family-monogram">DK</span><span aria-hidden="true">/</span><strong>Cijfercode</strong></span>
+          <a href="https://dckoster.com">All projects</a>
+        </div>
+        <p>Woordenlijst: Stichting OpenTaal · <a href="https://github.com/DCKoster/cijfercode">Broncode en licenties</a></p>
+      </footer>
     </div>
     <PrintDocument job={printJob} />
   </>;
