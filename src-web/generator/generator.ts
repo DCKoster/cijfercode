@@ -4,6 +4,7 @@ import { SeededRandom } from "./random";
 const WIDTH = 17 as const;
 const HEIGHT = 20 as const;
 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const MINIMUM_INDEPENDENT_LOOPS = 3;
 const DEFAULT_OPTIONS: GenerationOptions = { theme: "general", requireEveryLetter: false, includeProperNames: false };
 const PROFILES: Record<Difficulty, { minimumScore: number; hints: number; maxNodes: number }> = {
   1: { minimumScore: 4, hints: 3, maxNodes: 100 },
@@ -36,6 +37,19 @@ export function candidates(lexicon: LexiconData, length: number, minimumScore: n
 function cells(entry: Pick<Entry, "row" | "column" | "direction" | "length">): Array<[number, number]> {
   const [dr, dc] = entry.direction === "across" ? [0, 1] : [1, 0];
   return Array.from({ length: entry.length }, (_, offset) => [entry.row + dr * offset, entry.column + dc * offset]);
+}
+
+export function independentCrossingLoops(entries: Array<Pick<Entry, "row" | "column" | "direction" | "length">>): number {
+  if (!entries.length) return 0;
+  const usage = new Map<string, number>();
+  for (const entry of entries) {
+    for (const [row, column] of cells(entry)) {
+      const key = `${row},${column}`;
+      usage.set(key, (usage.get(key) ?? 0) + 1);
+    }
+  }
+  const crossings = Array.from(usage.values()).filter((count) => count > 1).length;
+  return Math.max(0, crossings - entries.length + 1);
 }
 
 function generateFill(lexicon: LexiconData, random: SeededRandom, minimumScore: number, options: GenerationOptions): FillResult | null {
@@ -251,7 +265,7 @@ export async function generatePuzzle(difficulty: Difficulty, seed: string, lexic
     if (cancelled?.()) throw new Error("Geannuleerd");
     onProgress?.(attempt, maximum);
     const fill = generateFill(lexicon, random, profile.minimumScore, options);
-    if (!fill) continue;
+    if (!fill || independentCrossingLoops(fill.entries) < MINIMUM_INDEPENDENT_LOOPS) continue;
     const shuffled = random.shuffle(LETTERS.split(""));
     const codeToLetter: Record<number, string> = Object.fromEntries(shuffled.map((letter, index) => [index + 1, letter]));
     const letterToCode = Object.fromEntries(Object.entries(codeToLetter).map(([code, letter]) => [letter, Number(code)]));

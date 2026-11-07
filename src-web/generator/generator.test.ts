@@ -1,13 +1,28 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import rawLexicon from "../../public/lexicon.json";
-import { normalizeTheme, type LexiconData } from "../types";
-import { candidates, generatePuzzle } from "./generator";
-import type { Difficulty } from "../types";
+import { normalizeTheme, type Difficulty, type Entry, type LexiconData } from "../types";
+import { candidates, generatePuzzle, independentCrossingLoops } from "./generator";
 
 const lexicon = rawLexicon as unknown as LexiconData;
 
 describe("browser generator", () => {
+  it("requires at least three independent crossing loops", () => {
+    const entries: Entry[] = [
+      { row: 2, column: 0, direction: "across", length: 5, word: "AAAAA" },
+      { row: 0, column: 1, direction: "down", length: 5, word: "AAAAA" },
+      { row: 0, column: 3, direction: "down", length: 5, word: "AAAAA" },
+      { row: 0, column: 0, direction: "across", length: 5, word: "AAAAA" },
+      { row: 4, column: 0, direction: "across", length: 5, word: "AAAAA" },
+      { row: 0, column: 4, direction: "down", length: 3, word: "AAA" },
+    ];
+
+    expect(independentCrossingLoops(entries.slice(0, 3))).toBe(0);
+    expect(independentCrossingLoops(entries.slice(0, 4))).toBe(1);
+    expect(independentCrossingLoops(entries.slice(0, 5))).toBe(2);
+    expect(independentCrossingLoops(entries)).toBe(3);
+  });
+
   it("ships a validated animal lexicon with full alphabet coverage", () => {
     const words = Object.values(lexicon.themes.animals.words).flat().map(([word]) => word);
     const letters = new Set(words.join(""));
@@ -50,6 +65,21 @@ describe("browser generator", () => {
     const animalWords = new Set(Object.values(lexicon.themes.animals.words).flat().map(([word]) => word));
     expect(puzzle.theme).toBe("animals_all");
     expect(puzzle.solution.entries.every((entry) => animalWords.has(entry.word))).toBe(true);
+  }, 120_000);
+
+  it("retries a tree-like themed fill", async () => {
+    let finalAttempt = 0;
+    const puzzle = await generatePuzzle(
+      2,
+      "connect-animals_all-2",
+      lexicon,
+      (attempt) => { finalAttempt = attempt; },
+      undefined,
+      { theme: "animals_all" },
+    );
+
+    expect(finalAttempt).toBeGreaterThan(1);
+    expect(independentCrossingLoops(puzzle.solution.entries)).toBeGreaterThanOrEqual(3);
   }, 120_000);
 
   it.each(["general", "animals_all"] as const)("can require every letter for %s puzzles", async (theme) => {
