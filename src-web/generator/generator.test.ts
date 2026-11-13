@@ -2,11 +2,34 @@
 import { describe, expect, it } from "vitest";
 import rawLexicon from "../../public/lexicon.json";
 import { normalizeTheme, type Difficulty, type Entry, type LexiconData } from "../types";
-import { candidates, generatePuzzle, independentCrossingLoops } from "./generator";
+import { candidates, generatePuzzle, independentCrossingLoops, selectGivenCodes } from "./generator";
+import { SeededRandom } from "./random";
 
 const lexicon = rawLexicon as unknown as LexiconData;
 
 describe("browser generator", () => {
+  it("selects seeded semi-random hints from repeated letters", () => {
+    const frequencies = new Map([[1, 8], [2, 7], [3, 5], [4, 2], [5, 1], [6, 12], [7, 9]]);
+    const letters = { 1: "A", 2: "N", 3: "S", 4: "K", 5: "B", 6: "Q", 7: "X" };
+    const first = selectGivenCodes(frequencies, letters, 3, new SeededRandom("hints"));
+    const second = selectGivenCodes(frequencies, letters, 3, new SeededRandom("hints"));
+
+    expect(first).toEqual(second);
+    expect(first).toHaveLength(3);
+    expect(first.every((code) => frequencies.get(code)! > 1)).toBe(true);
+    expect(first.map((code) => letters[code as keyof typeof letters])).not.toContain("Q");
+    expect(first.map((code) => letters[code as keyof typeof letters])).not.toContain("X");
+  });
+
+  it("uses non-Q/X singletons only when repeated letters are insufficient", () => {
+    const frequencies = new Map([[1, 4], [2, 1], [3, 1], [4, 8]]);
+    const letters = { 1: "R", 2: "B", 3: "C", 4: "Q" };
+    const selected = selectGivenCodes(frequencies, letters, 3, new SeededRandom("fallback"));
+
+    expect(selected[0]).toBe(1);
+    expect(new Set(selected)).toEqual(new Set([1, 2, 3]));
+  });
+
   it("requires at least three independent crossing loops", () => {
     const entries: Entry[] = [
       { row: 2, column: 0, direction: "across", length: 5, word: "AAAAA" },

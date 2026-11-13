@@ -52,6 +52,19 @@ export function independentCrossingLoops(entries: Array<Pick<Entry, "row" | "col
   return Math.max(0, crossings - entries.length + 1);
 }
 
+export function selectGivenCodes(
+  frequencies: Map<number, number>,
+  codeToLetter: Record<number, string>,
+  count: number,
+  random: SeededRandom,
+): number[] {
+  const allowed = Array.from(frequencies)
+    .filter(([code]) => !["Q", "X"].includes(codeToLetter[code]));
+  const repeated = allowed.filter(([, frequency]) => frequency > 1).map(([code]) => code);
+  const singletons = allowed.filter(([, frequency]) => frequency === 1).map(([code]) => code);
+  return [...random.shuffle(repeated), ...random.shuffle(singletons)].slice(0, count);
+}
+
 function generateFill(lexicon: LexiconData, random: SeededRandom, minimumScore: number, options: GenerationOptions): FillResult | null {
   const pool: string[] = [];
   const scores = new Map<string, number>();
@@ -272,8 +285,9 @@ export async function generatePuzzle(difficulty: Difficulty, seed: string, lexic
     const grid = fill.grid.map((row) => row.map((letter) => letter === null ? null : letterToCode[letter]));
     const frequencies = new Map<number, number>();
     grid.flat().forEach((code) => { if (code !== null) frequencies.set(code, (frequencies.get(code) ?? 0) + 1); });
-    const usedCodes = Array.from(frequencies).sort((a, b) => b[1] + random.next() * 3 - a[1] - random.next() * 3).map(([code]) => code);
-    const givens = Object.fromEntries(usedCodes.slice(0, profile.hints).map((code) => [code, codeToLetter[code]]));
+    const givenCodes = selectGivenCodes(frequencies, codeToLetter, profile.hints, random);
+    if (givenCodes.length < profile.hints) continue;
+    const givens = Object.fromEntries(givenCodes.map((code) => [code, codeToLetter[code]]));
     const solved = solve(grid, givens, lexicon, profile.minimumScore, options.theme !== "general" ? 5000 : profile.maxNodes, options);
     if (!matchesDifficulty(difficulty, solved.metrics, options)) continue;
     return {
