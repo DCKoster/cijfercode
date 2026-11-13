@@ -69,6 +69,7 @@ button:disabled { cursor: default; opacity: .6; }
 .puzzle-heading { display: flex; align-items: start; justify-content: space-between; }
 .booklet h2 { margin: 0 0 8px; font-size: 2rem; font-weight: 500; }
 .instructions { margin: 5px 0 24px; color: #5b5952; }
+.mobile-letter-entry { display: none; }
 .play-area { display: grid; grid-template-columns: minmax(340px, 680px) minmax(280px, 1fr); align-items: start; gap: clamp(20px, 3vw, 38px); }
 .puzzle-grid { --columns: 17; display: grid; grid-template-columns: repeat(var(--columns), minmax(0, 1fr)); width: min(100%, 680px); margin: 0 auto; border: 2px solid var(--ink); background: var(--ink); box-shadow: 5px 5px 0 #8f9d6a66; gap: 1px; aspect-ratio: 17 / 20; }
 .puzzle-grid .cell { position: relative; min-width: 0; padding: 0; border: 0; border-radius: 0; color: var(--ink); background: white; aspect-ratio: 1; }
@@ -115,6 +116,11 @@ button:disabled { cursor: default; opacity: .6; }
 .site-footer p { margin: 0; padding: 21px max(20px, calc((100vw - 1160px) / 2)); color: #e3e8e1; text-align: center; }
 .site-footer p a { color: white; text-underline-offset: 3px; }
 .print-document { display: none; }
+
+@media (pointer: coarse) {
+  .mobile-letter-entry { display: flex; align-items: center; gap: 12px; width: fit-content; margin: -8px 0 18px; font: 700 .85rem system-ui, sans-serif; }
+  .mobile-letter-entry input { width: 3.2rem; padding: 8px; border: 1px solid var(--line); border-radius: 2px; color: var(--ink); background: #fffefa; font-size: 1rem; font-weight: 700; text-align: center; text-transform: uppercase; }
+}
 
 @media (max-width: 700px) {
   .site-header { align-items: flex-start; gap: 12px; padding-inline: 16px; }

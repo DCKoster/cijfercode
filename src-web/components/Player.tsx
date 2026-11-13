@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { themeLabel, type PuzzleDocument } from "../types";
 import { PuzzleGrid } from "./PuzzleGrid";
 
@@ -9,6 +9,7 @@ export function Player({ puzzle, saved, onSave, onPrint }: { puzzle: PuzzleDocum
   const [selected, setSelected] = useState<number | null>(() => Number(Object.keys(puzzle.givens)[0]) || puzzle.grid.flat().find((cell) => cell !== null) || null);
   const [incorrect, setIncorrect] = useState<Set<number>>(new Set());
   const [notice, setNotice] = useState("");
+  const letterInput = useRef<HTMLInputElement>(null);
   const usedCodes = useMemo(() => new Set(puzzle.grid.flat().filter((cell): cell is number => cell !== null)), [puzzle]);
   const complete = Array.from(usedCodes).every((code) => mapping[code] === puzzle.solution.codeToLetter[code]);
   const hasPlayerLetters = Object.keys(mapping).some((code) => !puzzle.givens[Number(code)]);
@@ -23,21 +24,42 @@ export function Player({ puzzle, saved, onSave, onPrint }: { puzzle: PuzzleDocum
     setNotice("");
   };
 
+  const clearSelected = () => {
+    if (selected === null || puzzle.givens[selected]) return;
+    setMapping((current) => { const next = { ...current }; delete next[selected]; return next; });
+    clearFeedbackFor(selected);
+  };
+
+  const assignLetter = (value: string) => {
+    if (selected === null || puzzle.givens[selected]) return;
+    const letter = value.toUpperCase().match(/[A-Z]/)?.[0];
+    if (!letter) return;
+    const occupied = Object.entries(mapping).find(([code, current]) => current === letter && Number(code) !== selected);
+    if (occupied) { setNotice(`De letter ${letter} hoort al bij code ${occupied[0]}.`); return; }
+    clearFeedbackFor(selected);
+    setMapping((current) => ({ ...current, [selected]: letter }));
+  };
+
+  const selectCode = (code: number) => {
+    setSelected(code);
+    const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? navigator.maxTouchPoints > 0;
+    if (!coarsePointer) return;
+    if (puzzle.givens[code]) letterInput.current?.blur();
+    else letterInput.current?.focus({ preventScroll: true });
+  };
+
   useEffect(() => { onSave({ puzzleId: puzzle.puzzleId, mapping }); }, [mapping, onSave, puzzle.puzzleId]);
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (target instanceof HTMLElement && (target.matches("input, textarea, select") || target.isContentEditable)) return;
       if (selected === null || puzzle.givens[selected]) return;
       if (event.key === "Backspace" || event.key === "Delete") {
         event.preventDefault();
-        setMapping((current) => { const next = { ...current }; delete next[selected]; return next; });
-        clearFeedbackFor(selected);
+        clearSelected();
         return;
       }
-      const letter = event.key.toUpperCase();
-      if (!/^[A-Z]$/.test(letter)) return;
-      const occupied = Object.entries(mapping).find(([code, value]) => value === letter && Number(code) !== selected);
-      if (occupied) { setNotice(`De letter ${letter} hoort al bij code ${occupied[0]}.`); return; }
-      clearFeedbackFor(selected); setMapping((current) => ({ ...current, [selected]: letter }));
+      assignLetter(event.key);
     };
     window.addEventListener("keydown", handleKey); return () => window.removeEventListener("keydown", handleKey);
   }, [mapping, puzzle.givens, selected]);
@@ -66,8 +88,13 @@ export function Player({ puzzle, saved, onSave, onPrint }: { puzzle: PuzzleDocum
   return <section className="player card">
     <div className="puzzle-heading"><p className="eyebrow">Niveau {puzzle.difficulty} · {themeLabel(puzzle.theme)}{puzzle.requireEveryLetter ? " · Volledig alfabet" : ""}</p><button className="text-button" onClick={onPrint}>Afdrukken</button></div>
     <p className="instructions">Selecteer een vakje en typ een letter. De letter verschijnt automatisch bij dezelfde code.</p>
+    <label className="mobile-letter-entry">Letter voor code {selected ?? "–"}<input ref={letterInput} type="text" inputMode="text" maxLength={1} value="" autoCapitalize="characters" autoComplete="off" spellCheck={false} aria-label={`Letter voor code ${selected ?? "–"}`} onChange={(event) => assignLetter(event.target.value)} onKeyDown={(event) => {
+      if (event.key !== "Backspace" && event.key !== "Delete") return;
+      event.preventDefault();
+      clearSelected();
+    }} /></label>
     <div className="play-area">
-      <PuzzleGrid puzzle={puzzle} mapping={mapping} selected={selected} incorrect={incorrect} onSelect={setSelected} />
+      <PuzzleGrid puzzle={puzzle} mapping={mapping} selected={selected} incorrect={incorrect} onSelect={selectCode} />
       <aside className="player-tools">
         <div className="player-feedback" aria-live="polite">
           {complete && <div className="success"><strong>Goed gedaan!</strong> De cijfercode is opgelost.</div>}

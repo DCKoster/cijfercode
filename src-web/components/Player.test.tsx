@@ -6,6 +6,7 @@ import { Player } from "./Player";
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 const emptyGrid = () => Array.from({ length: 20 }, () => Array.from<number | null>({ length: 17 }).fill(null));
@@ -25,6 +26,46 @@ function puzzle(): PuzzleDocument {
 }
 
 describe("Player", () => {
+  it("focuses a real letter input and enters letters on coarse pointers", () => {
+    vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: true }));
+    render(<Player puzzle={puzzle()} onSave={vi.fn()} onPrint={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("gridcell", { name: "Code 2" }));
+    const input = screen.getByRole("textbox", { name: "Letter voor code 2" });
+    expect(input).toHaveFocus();
+
+    fireEvent.change(input, { target: { value: "c" } });
+    expect(screen.getByRole("gridcell", { name: "Code 2, letter C" })).toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: "Backspace" });
+    expect(screen.getByRole("gridcell", { name: "Code 2" })).toBeInTheDocument();
+  });
+
+  it("closes mobile letter entry when a given code is selected", () => {
+    vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: true }));
+    const themed = puzzle();
+    themed.givens = { 1: "A" };
+    render(<Player puzzle={themed} onSave={vi.fn()} onPrint={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("gridcell", { name: "Code 2" }));
+    const input = screen.getByRole("textbox", { name: "Letter voor code 2" });
+    expect(input).toHaveFocus();
+
+    fireEvent.click(screen.getByRole("gridcell", { name: "Code 1, letter A" }));
+    expect(input).not.toHaveFocus();
+  });
+
+  it("keeps desktop grid selection and physical keyboard entry unchanged", () => {
+    vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: false }));
+    render(<Player puzzle={puzzle()} onSave={vi.fn()} onPrint={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("gridcell", { name: "Code 2" }));
+    expect(screen.getByRole("textbox", { name: "Letter voor code 2" })).not.toHaveFocus();
+    fireEvent.keyDown(window, { key: "C" });
+
+    expect(screen.getByRole("gridcell", { name: "Code 2, letter C" })).toBeInTheDocument();
+  });
+
   it("shows level and theme without exposing the internal puzzle id", () => {
     const themed = { ...puzzle(), theme: "animals_familiar" as const };
     render(<Player puzzle={themed} onSave={vi.fn()} onPrint={vi.fn()} />);
