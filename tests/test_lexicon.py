@@ -4,7 +4,14 @@ import json
 import pytest
 
 from cijfercode.errors import LexiconUnavailable
-from cijfercode.lexicon import Lexicon, adjusted_minimum_score, normalize_word, sync_words
+from cijfercode.lexicon import (
+    Lexicon,
+    adjusted_minimum_score,
+    is_suitable_puzzle_word,
+    normalize_source_word,
+    normalize_word,
+    sync_words,
+)
 
 
 def test_normalize_word_uses_plain_alphabet_and_separate_ij():
@@ -21,8 +28,37 @@ def test_normalize_word_uses_plain_alphabet_and_separate_ij():
     assert adjusted_minimum_score(4.0, 15) == pytest.approx(2.8)
 
 
+def test_source_normalization_rejects_abbreviations_but_preserves_word_case():
+    assert normalize_source_word("DNS") is None
+    assert normalize_source_word("XIV") is None
+    assert normalize_source_word("dove") == "DOVE"
+    assert normalize_source_word("Angèles") == "ANGELES"
+
+
+@pytest.mark.parametrize(
+    ("word", "dutch", "english", "expected"),
+    [
+        ("LIMIT", 3.19, 4.70, False),
+        ("THE", 5.76, 7.73, False),
+        ("NEW", 5.24, 6.25, False),
+        ("CMS", 3.04, 3.36, False),
+        ("ANGELES", 4.13, 4.73, False),
+        ("CUE", 2.70, 3.75, False),
+        ("DOVE", 3.65, 3.67, True),
+        ("TACT", 2.86, 3.08, True),
+        ("BEEN", 4.57, 6.27, True),
+        ("LONG", 4.13, 5.81, True),
+        ("EVER", 3.61, 5.66, True),
+        ("PATIENT", 3.57, 4.77, True),
+        ("TELLING", 3.48, 4.92, True),
+    ],
+)
+def test_puzzle_word_suitability(word, dutch, english, expected):
+    assert is_suitable_puzzle_word(word, dutch, english) is expected
+
+
 def test_sync_and_load_cache(monkeypatch, tmp_path):
-    payload = "appel\ncafé\nrode wijn\nijs\nappel\n".encode()
+    payload = "appel\ncafé\nrode wijn\nijs\nappel\nDNS\nXIV\n".encode()
 
     class Response:
         def __enter__(self):
@@ -40,7 +76,7 @@ def test_sync_and_load_cache(monkeypatch, tmp_path):
     cached = (tmp_path / "words.txt").read_bytes()
     assert cached == b"APPEL\nCAFE\nIJS\n"
     assert metadata.sha256 == hashlib.sha256(cached).hexdigest()
-    assert metadata.normalization_version == 2
+    assert metadata.normalization_version == 3
     assert metadata.maximum_word_length == 20
     assert json.loads((tmp_path / "metadata.json").read_text())["word_count"] == 3
     assert Lexicon.from_cache(tmp_path).words(3) == ("IJS",)
@@ -55,7 +91,7 @@ def test_cache_checksum_is_verified(tmp_path):
                 "downloaded_at": "",
                 "sha256": "wrong",
                 "word_count": 1,
-                "normalization_version": 2,
+                "normalization_version": 3,
                 "maximum_word_length": 20,
             }
         ),

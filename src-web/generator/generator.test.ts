@@ -36,10 +36,34 @@ describe("browser generator", () => {
   it("ships a reviewed familiar-animal subset based on language frequency", () => {
     const all = new Set(Object.values(lexicon.themes.animals.words).flat().map(([word]) => word));
     const familiar = Object.values(lexicon.themes.animals.familiarWords).flat();
+    const familiarWords = new Set(familiar.map(([word]) => word));
     expect(familiar.length).toBeGreaterThanOrEqual(500);
-    expect(new Set(familiar.map(([word]) => word)).size).toBe(familiar.length);
+    expect(familiarWords.size).toBe(familiar.length);
     expect(familiar.every(([word, score]) => all.has(word) && score >= 1)).toBe(true);
     expect(familiar.some(([word]) => word.includes("Q"))).toBe(false);
+    expect(familiarWords).not.toContain("DRAAK");
+    expect(familiarWords).not.toContain("HYDRA");
+    expect(familiarWords).not.toContain("EENHOORN");
+  });
+
+  it("excludes non-Dutch tokens from the general puzzle vocabulary", () => {
+    const words = new Set(Object.values(lexicon.words).flat().map(([word]) => word));
+    expect(words).not.toContain("THE");
+    expect(words).not.toContain("NEW");
+    expect(words).not.toContain("DAY");
+    expect(words).not.toContain("LIMIT");
+    expect(words).not.toContain("CUE");
+    expect(words).not.toContain("AAA");
+    expect(words).not.toContain("DNS");
+    expect(words).not.toContain("IDE");
+    expect(words).not.toContain("XIV");
+    expect(words).not.toContain("CMS");
+    expect(words).not.toContain("SQL");
+    expect(words).not.toContain("WOB");
+    expect(words).not.toContain("ONT");
+    expect(words).not.toContain("ANGELES");
+    expect(words).toContain("DOVE");
+    expect(words).toContain("TACT");
   });
 
   it("creates a deterministic, uniquely solved 17×20 puzzle", async () => {

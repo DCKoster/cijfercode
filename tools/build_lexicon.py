@@ -13,7 +13,7 @@ from pathlib import Path
 
 from wordfreq import zipf_frequency
 
-from cijfercode.lexicon import Lexicon, default_cache_dir
+from cijfercode.lexicon import Lexicon, default_cache_dir, is_suitable_puzzle_word
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,18 +25,21 @@ def main() -> None:
     lexicon = Lexicon.from_cache(default_cache_dir())
     words: dict[str, list[list[str | float]]] = {}
     for length in range(3, 21):
+        scored_words = []
+        for word in lexicon.words(length):
+            dutch_frequency = float(zipf_frequency(word.lower(), "nl"))
+            english_frequency = float(zipf_frequency(word.lower(), "en"))
+            if is_suitable_puzzle_word(word, dutch_frequency, english_frequency):
+                scored_words.append((word, round(dutch_frequency, 2)))
         scored = sorted(
-            (
-                (word, round(float(zipf_frequency(word.lower(), "nl")), 2))
-                for word in lexicon.words(length)
-            ),
+            scored_words,
             key=lambda item: (-item[1], item[0]),
         )[:WORDS_PER_LENGTH]
         words[str(length)] = [[word, score] for word, score in scored]
 
     source_hash = lexicon.metadata.sha256
     payload = {
-        "version": f"opentaal-{source_hash[:12]}-top{WORDS_PER_LENGTH}",
+        "version": f"opentaal-{source_hash[:12]}-top{WORDS_PER_LENGTH}-curated2",
         "sourceUrl": lexicon.metadata.source_url,
         "generatedAt": datetime.now(UTC).isoformat(),
         "words": words,

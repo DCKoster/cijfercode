@@ -35,7 +35,7 @@ AMBIGUOUS_ANIMAL_NAMES = {
     "ESPENBLAD", "GEISHA", "GLASSNIJDER", "GROENTJE", "GROOTKRUIS", "HAARBOS",
     "HARDLOPER", "HILLE", "HUISMOEDER", "JUWEELTJE", "KIJKGAATJE", "KOEVINKJE",
     "KOSMOPOLIET", "KRAAK", "KRAKELING", "KRASSER", "KUIFJE", "LANTAARNTJE",
-    "LETTERZETTER", "LIEVELING", "LOCOMOTIEFJE", "LOOIER", "MARGRIETJE",
+    "EENHOORN", "HYDRA", "LETTERZETTER", "LIEVELING", "LOCOMOTIEFJE", "LOOIER", "MARGRIETJE",
     "MEMEL", "MICHELINMANNETJE", "MOERTJE", "MORGENROOD", "MUILTJE", "MULDER",
     "NEGERTJE", "NONNETJE", "OPROLLER", "PAAPJE", "PAPEGAAITJE", "PARASOLLETJE",
     "PLAKKER", "RIEMPJE", "ROODKAPJE", "ROESJE", "SCHAAPJE", "SCHEPJE",
@@ -119,7 +119,7 @@ def main() -> None:
         )
 
     payload["properNames"] = sorted(proper_only)
-    payload["version"] = f"{payload['version'].split('+', 1)[0]}+nsr{nsr_version.replace('-', '')}-names1-animalsets2"
+    payload["version"] = f"{payload['version'].split('+', 1)[0]}+nsr{nsr_version.replace('-', '')}-names1-animalsets3"
     payload["themes"] = {
         "animals": {
             "sourceUrl": NSR_URL,

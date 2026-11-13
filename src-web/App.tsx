@@ -47,7 +47,6 @@ export default function App() {
       <header className="site-header"><a href="#" className="brand" onClick={(event) => { event.preventDefault(); setTab("play"); }}>Cijfercode<span>Nederlandse woordpuzzels</span></a><nav aria-label="Hoofdnavigatie"><button className={tab === "play" ? "active" : ""} onClick={() => setTab("play")}>Spelen</button><button className={tab === "booklet" ? "active" : ""} onClick={() => setTab("booklet")}>Boekje maken</button></nav></header>
       <main>
         {tab === "play" ? <>
-          <section className="hero"><p className="eyebrow">Elke letter heeft een nummer</p><h1>Kraak de cijfercode</h1><p>Kies een niveau en vul de Nederlandse woorden in. Dezelfde cijfers zijn altijd dezelfde letters.</p></section>
           <section className="generator card">
             <DifficultyPicker value={difficulty} onChange={setDifficulty} disabled={busy} />
             <div className="generation-settings">

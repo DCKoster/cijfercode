@@ -19,8 +19,66 @@ OPENTAAL_URL = (
     "https://raw.githubusercontent.com/OpenTaal/opentaal-wordlist/"
     "master/wordlist.txt"
 )
-CACHE_SCHEMA_VERSION = 2
+CACHE_SCHEMA_VERSION = 3
 MAXIMUM_WORD_LENGTH = 20
+
+# OpenTaal is a spelling-checker source, not a puzzle vocabulary. It therefore
+# also contains source-code terms, abbreviations and tokens that are useful in
+# running text but unsuitable as standalone Dutch puzzle words. These explicit
+# exclusions cover entries whose category cannot be inferred reliably from a
+# frequency score alone.
+PUZZLE_WORD_EXCLUSIONS = frozenset(
+    {
+        "AAA",
+        "ANGELES",
+        "CMS",
+        "CUE",
+        "DAY",
+        "DNS",
+        "IDE",
+        "LIMIT",
+        "NOT",
+        "ONT",
+        "SQL",
+        "WOB",
+        "XIV",
+    }
+)
+
+# A large lead in the English corpus is a useful signal for unadapted English
+# words accidentally present in Dutch web text. BEEN and LONG are genuine Dutch
+# words (leg/bone and lung) whose English spellings happen to be very frequent.
+ENGLISH_DOMINANCE_MARGIN = 1.0
+ENGLISH_DOMINANCE_EXCEPTIONS = frozenset(
+    {
+        # Dutch words that are spelled identically to a frequent English word.
+        "BEEN",
+        "COMMUNIST",
+        "DOG",
+        "END",
+        "EPISODE",
+        "ERA",
+        "EVER",
+        "FUNDAMENTALIST",
+        "GAVE",
+        "GIFT",
+        "LONG",
+        "LOST",
+        "LOT",
+        "MAD",
+        "MEET",
+        "NOR",
+        "OFFER",
+        "PATIENT",
+        "POSE",
+        "PUT",
+        "SIGNIFICANT",
+        "STAMP",
+        "TELLING",
+        "WIN",
+        "WINNING",
+    }
+)
 
 
 def adjusted_minimum_score(base_score: float, length: int) -> float:
@@ -46,6 +104,29 @@ def normalize_word(value: str) -> str | None:
     if not 3 <= len(normalized) <= MAXIMUM_WORD_LENGTH:
         return None
     return normalized
+
+
+def normalize_source_word(value: str) -> str | None:
+    """Normalize an OpenTaal entry, rejecting abbreviation-only source forms."""
+    source = value.strip()
+    normalized = normalize_word(source)
+    if normalized is None or source.isupper():
+        return None
+    return normalized
+
+
+def is_suitable_puzzle_word(
+    word: str,
+    dutch_frequency: float,
+    english_frequency: float,
+) -> bool:
+    """Return whether a normalized word belongs in the general puzzle pool."""
+    if word in PUZZLE_WORD_EXCLUSIONS:
+        return False
+    return (
+        word in ENGLISH_DOMINANCE_EXCEPTIONS
+        or english_frequency - dutch_frequency < ENGLISH_DOMINANCE_MARGIN
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,7 +183,7 @@ def sync_words(
         {
             normalized
             for line in text.splitlines()
-            if (normalized := normalize_word(line)) is not None
+            if (normalized := normalize_source_word(line)) is not None
         }
     )
     if not words:

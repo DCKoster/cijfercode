@@ -55,6 +55,13 @@ Nederlands Soortenregister. Daardoor doet
 de productiebuild geen netwerkdownload en blijven seeds reproduceerbaar binnen
 dezelfde generator- en lexiconversie.
 
+Bij het synchroniseren worden entries die uitsluitend als hoofdletterafkorting
+in OpenTaal staan geweigerd. De browserbuild verwijdert daarnaast woorden die
+duidelijk vaker Engels dan Nederlands zijn en een kleine, geteste uitsluitlijst
+voor ambigue afkortingen, losse voorvoegsels en naamfragmenten. Zo blijft de
+OpenTaal-bronvermelding behouden zonder de spellingcheckerlijst ongefilterd als
+puzzelwoordenboek te behandelen.
+
 Installeer voor een bewuste update eerst de Python-ontwikkelomgeving en haal een
 nieuwe OpenTaal- en Naturalis-momentopnames op:
 
