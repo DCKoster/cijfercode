@@ -18,6 +18,7 @@ export interface GenerationOptions {
   theme: Theme;
   requireEveryLetter: boolean;
   includeProperNames: boolean;
+  generationMode: "interactive" | "booklet";
 }
 export type Cell = number | null;
 export type LetterCell = string | null;
@@ -40,7 +41,7 @@ export interface SolverMetrics {
 
 export interface PuzzleDocument {
   schemaVersion: 4;
-  generatorVersion: "web-3";
+  generatorVersion: "web-3" | "web-4";
   lexiconVersion: string;
   puzzleId: string;
   seed: string;

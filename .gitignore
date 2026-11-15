@@ -9,3 +9,4 @@ node_modules/
 .wrangler/
 coverage/
 *.tsbuildinfo
+temp/*

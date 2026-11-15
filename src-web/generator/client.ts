@@ -40,6 +40,7 @@ export function requestPuzzle(
         theme: options.theme ?? "general",
         requireEveryLetter: options.requireEveryLetter ?? false,
         includeProperNames: options.includeProperNames ?? false,
+        generationMode: options.generationMode ?? "interactive",
       },
     };
     getWorker().postMessage(message);

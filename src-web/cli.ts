@@ -23,7 +23,7 @@ async function main(): Promise<void> {
     level as Difficulty, seed, lexicon,
     (attempt) => process.stderr.write(`\rPoging ${attempt}`),
     undefined,
-    { theme, requireEveryLetter: process.argv.includes("--all-letters"), includeProperNames: process.argv.includes("--include-names") },
+    { theme, requireEveryLetter: process.argv.includes("--all-letters"), includeProperNames: process.argv.includes("--include-names"), generationMode: "interactive" },
   );
   process.stderr.write("\r                \r");
   const json = `${JSON.stringify(puzzle, null, 2)}\n`;

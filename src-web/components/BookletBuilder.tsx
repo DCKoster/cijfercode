@@ -68,6 +68,7 @@ export function BookletBuilder({ initial, onSave, onPrint }: { initial: { spec: 
               theme: options.theme,
               requireEveryLetter: options.requireEveryLetter,
               includeProperNames: options.includeProperNames,
+              generationMode: "booklet",
               signal: controller.signal,
               onProgress: (attempt) => setStatus(`Puzzel ${number} van ${total} · poging ${attempt}`),
             });

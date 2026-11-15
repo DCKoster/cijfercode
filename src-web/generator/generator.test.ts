@@ -154,8 +154,8 @@ describe("browser generator", () => {
   });
 
   it("excludes pure proper names by default and permits them explicitly", () => {
-    const hidden = candidates(lexicon, 4, 0, { theme: "general", requireEveryLetter: false, includeProperNames: false });
-    const allowed = candidates(lexicon, 4, 0, { theme: "general", requireEveryLetter: false, includeProperNames: true });
+    const hidden = candidates(lexicon, 4, 0, { theme: "general", requireEveryLetter: false, includeProperNames: false, generationMode: "interactive" });
+    const allowed = candidates(lexicon, 4, 0, { theme: "general", requireEveryLetter: false, includeProperNames: true, generationMode: "interactive" });
     expect(hidden).not.toContain("KYRA");
     expect(allowed).toContain("KYRA");
   });
