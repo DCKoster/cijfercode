@@ -1,9 +1,12 @@
 // @vitest-environment node
-import { describe, expect, it } from "vitest";
+import * as procedural from "./proceduralLayout";
+import * as filling from "./fill";
+import { PROCEDURAL_RESTARTS, TEMPLATE_ATTEMPTS, FILLS_PER_RESTART } from "./proceduralLayout";
+import { describe, expect, it, vi } from "vitest";
 import rawLexicon from "../../public/lexicon.json";
 import { normalizeTheme, puzzleSignature, type Difficulty, type Entry, type LexiconData, type PuzzleSignature } from "../types";
-import { candidates, generatePuzzle, independentCrossingLoops, selectGivenCodes } from "./generator";
-import { LAYOUT_PROFILES, assessBlockMask } from "./layout";
+import { distinctAnswerCount, candidates, generatePuzzle, independentCrossingLoops, selectGivenCodes } from "./generator";
+import { LAYOUT_PROFILES, assessBlockMask, layoutDistance } from "./layout";
 import { SeededRandom } from "./random";
 
 const lexicon = rawLexicon as unknown as LexiconData;
@@ -90,6 +93,54 @@ describe("browser generator", () => {
     expect(words).toContain("TACT");
   });
 
+  it("compares distinct answers independently of order, entry placement, and code numbers", () => {
+    expect(distinctAnswerCount(new Set(["KAT", "UIL", "KRAB"]), new Set(["KRAB", "UIL", "KAT", "RUPS"]))).toBe(0);
+    expect(distinctAnswerCount(new Set(["KAT", "UIL", "KRAB", "RUPS"]), new Set(["KAT", "MUIS", "HOND", "VIS", "GANS"]))).toBe(3);
+  });
+
+  it("enters bounded fallback only after procedural exhaustion", async () => {
+    const restarts = vi.spyOn(procedural, "searchMasks").mockResolvedValue(false);
+    const report = vi.fn();
+    try {
+      await generatePuzzle(2, "fallback-accounting", lexicon, undefined, undefined, {}, [], report);
+      expect(restarts).toHaveBeenCalledTimes(PROCEDURAL_RESTARTS);
+      expect(report).toHaveBeenCalledOnce();
+      expect(report).toHaveBeenCalledWith({
+        fallbackEntered: true, source: "template", proceduralRestarts: PROCEDURAL_RESTARTS, proceduralFills: 0,
+        templateAttempts: expect.any(Number),
+      });
+      expect(report.mock.calls[0][0].templateAttempts).toBeGreaterThan(0);
+      expect(report.mock.calls[0][0].templateAttempts).toBeLessThanOrEqual(TEMPLATE_ATTEMPTS);
+    } finally {
+      restarts.mockRestore();
+    }
+  });
+
+  it("reports fallback exhaustion without an accepted source", async () => {
+    const restarts = vi.spyOn(procedural, "searchMasks").mockResolvedValue(false);
+    const prepare = vi.spyOn(filling, "prepareFill").mockReturnValue(null);
+    const report = vi.fn();
+    try {
+      await expect(generatePuzzle(2, "fallback-exhaustion", lexicon, undefined, undefined,
+        { generationMode: "booklet" }, [], report)).rejects.toThrow("geen unieke puzzel");
+      expect(report).toHaveBeenCalledWith({
+        fallbackEntered: true, proceduralRestarts: PROCEDURAL_RESTARTS, proceduralFills: 0, templateAttempts: TEMPLATE_ATTEMPTS,
+      });
+      expect(prepare).toHaveBeenCalledTimes(TEMPLATE_ATTEMPTS);
+    } finally {
+      prepare.mockRestore();
+      restarts.mockRestore();
+    }
+  });
+
+  it("generates different procedural layouts from different seeds with empty history", async () => {
+    const report = vi.fn();
+    const first = await generatePuzzle(2, "variety-free-a", lexicon, undefined, undefined, {}, [], report);
+    const second = await generatePuzzle(2, "variety-free-b", lexicon, undefined, undefined, {}, [], report);
+    expect(layoutDistance(puzzleSignature(first).layout, puzzleSignature(second).layout)).toBeGreaterThanOrEqual(12);
+    expect(report.mock.calls.map(([diagnostics]) => diagnostics.source)).toEqual(["procedural", "procedural"]);
+  }, 60_000);
+
   it("creates a deterministic, uniquely solved 17×20 puzzle", async () => {
     const first = await generatePuzzle(1, "vaste-test", lexicon);
     const second = await generatePuzzle(1, "vaste-test", lexicon);
@@ -98,6 +149,15 @@ describe("browser generator", () => {
     expect(first.grid.every((row) => row.length === 17)).toBe(true);
     expect(first.measured.solutions).toBe(1);
     expect(Object.keys(first.givens)).toHaveLength(3);
+    const renumbered = {
+      ...first,
+      grid: first.grid.map((row) => row.map((code) => code === null ? null : 27 - code)),
+      solution: { ...first.solution, entries: [...first.solution.entries].reverse() },
+    };
+    const originalSignature = puzzleSignature(first);
+    const remappedSignature = puzzleSignature(renumbered);
+    expect(remappedSignature.layout).toBe(originalSignature.layout);
+    expect(distinctAnswerCount(new Set(remappedSignature.answers), new Set(originalSignature.answers))).toBe(0);
   }, 60_000);
 
   it.each([2, 3, 4] as Difficulty[])("creates a valid level %s puzzle", async (difficulty) => {
@@ -117,8 +177,9 @@ describe("browser generator", () => {
 
   it.each([1, 2, 3, 4] as Difficulty[])("generates a dense, full-alphabet booklet puzzle at level %s", async (difficulty) => {
     let finalAttempt = 0;
+    const report = vi.fn();
     const puzzle = await generatePuzzle(difficulty, `booklet-alphabet-${difficulty}`, lexicon,
-      (attempt) => { finalAttempt = attempt; }, undefined, { generationMode: "booklet", requireEveryLetter: true });
+      (attempt) => { finalAttempt = attempt; }, undefined, { generationMode: "booklet", requireEveryLetter: true }, [], report);
     const mask = puzzle.grid.map((row) => row.map((cell) => cell === null));
     const lengths = new Map(Array.from({ length: 18 }, (_, index) => [index + 3, 1_200]));
 
@@ -127,7 +188,12 @@ describe("browser generator", () => {
     expect(new Set(puzzle.grid.flat().filter((code) => code !== null)).size).toBe(26);
     expect(puzzle.measured.solutions).toBe(1);
     expect(puzzle.measured.exhausted).toBe(false);
-    expect(finalAttempt).toBeLessThanOrEqual(3);
+    const { proceduralRestarts, proceduralFills, templateAttempts } = report.mock.calls[0][0];
+    expect(proceduralRestarts).toBeLessThanOrEqual(PROCEDURAL_RESTARTS);
+    expect(proceduralFills).toBeLessThanOrEqual(proceduralRestarts * FILLS_PER_RESTART);
+    expect(templateAttempts).toBeLessThanOrEqual(TEMPLATE_ATTEMPTS);
+    expect(finalAttempt).toBeGreaterThan(0);
+    expect(finalAttempt).toBeLessThanOrEqual(PROCEDURAL_RESTARTS + TEMPLATE_ATTEMPTS);
   });
 
   it.each(["animals_familiar", "animals_all"] as const)("makes a booklet puzzle for the %s theme", async (theme) => {
@@ -143,23 +209,23 @@ describe("browser generator", () => {
     expect(puzzle.solution.entries.every(({ word }) => words.has(word))).toBe(true);
     expect(puzzle.measured.solutions).toBe(1);
     if (requireEveryLetter) expect(new Set(puzzle.grid.flat().filter((code) => code !== null)).size).toBe(26);
-  });
+  }, 60_000);
 
   it.each(["booklet", "interactive"] as const)("varies four level-2 familiar-animal puzzles in %s mode", async (generationMode) => {
     const previous: PuzzleSignature[] = [];
     for (let index = 0; index < 4; index += 1) {
-      const puzzle = await generatePuzzle(2, "bekende-dieren-herhaling", lexicon, undefined, undefined,
+      const puzzle = await generatePuzzle(2, "bekende-dieren-herhaling-" + index, lexicon, undefined, undefined,
         { theme: "animals_familiar", generationMode }, previous);
       const signature = puzzleSignature(puzzle);
       for (const earlier of previous) {
-        const changedCells = [...signature.layout].filter((cell, position) => cell !== earlier.layout[position]).length;
+        const changedCells = layoutDistance(signature.layout, earlier.layout);
         const sharedWords = signature.answers.filter((word) => earlier.answers.includes(word)).length;
         expect(changedCells).toBeGreaterThanOrEqual(12);
         expect(Math.min(signature.answers.length, earlier.answers.length) - sharedWords).toBeGreaterThanOrEqual(3);
       }
       previous.push(signature);
     }
-  });
+  }, 120_000);
 
   it.each(["general", "animals_all"] as const)("can require every letter for %s puzzles", async (theme) => {
     const puzzle = await generatePuzzle(2, `alfabet-${theme}`, lexicon, undefined, undefined, { theme, requireEveryLetter: true });

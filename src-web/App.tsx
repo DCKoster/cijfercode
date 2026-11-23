@@ -8,7 +8,7 @@ import { loadStored, migrateLegacyStorage, storeValue } from "./storage";
 import { normalizeTheme, puzzleSignature, type BookletSpec, type Difficulty, type PuzzleDocument, type PuzzleSignature, type Theme } from "./types";
 
 type Tab = "play" | "booklet";
-interface SavedPlayer { puzzle: PuzzleDocument; state: PlayerState }
+interface SavedPlayer { puzzle: PuzzleDocument; state: PlayerState; recentPuzzles?: PuzzleSignature[] }
 interface SavedBooklet { spec: BookletSpec; puzzles: PuzzleDocument[] }
 
 export default function App() {
@@ -25,29 +25,37 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [printJob, setPrintJob] = useState<PrintJob | null>(null);
-  const recentPuzzles = useRef<PuzzleSignature[]>([]);
+  const recentPuzzles = useRef(savedPlayer?.recentPuzzles?.slice(-8) ?? (savedPlayer ? [puzzleSignature(savedPlayer.puzzle)] : []));
+  const abort = useRef<AbortController>();
   const savedBooklet = loadStored<SavedBooklet | null>("booklet", null);
 
   const generate = async () => {
+    const controller = new AbortController();
+    abort.current = controller;
     setBusy(true); setStatus("Woordenlijst laden…");
     try {
-      const previousPuzzles = recentPuzzles.current.length === 0 && puzzle ? [puzzleSignature(puzzle)] : recentPuzzles.current;
+      const previousPuzzles = recentPuzzles.current;
       const next = await requestPuzzle(difficulty, {
         theme,
         requireEveryLetter,
         includeProperNames: theme === "general" && includeProperNames,
         previousPuzzles,
+        signal: controller.signal,
         onProgress: (attempt) => setStatus(`Puzzel maken · poging ${attempt}`),
       });
       recentPuzzles.current = [...previousPuzzles.slice(-7), puzzleSignature(next)];
       const state = { puzzleId: next.puzzleId, mapping: { ...next.givens } };
-      setPuzzle(next); setPlayerState(state); storeValue("player", { puzzle: next, state }); setStatus("");
-    } catch (error) { setStatus(error instanceof Error ? error.message : "Genereren mislukt."); }
-    finally { setBusy(false); }
+      setPuzzle(next); setPlayerState(state); storeValue("player", { puzzle: next, state, recentPuzzles: recentPuzzles.current }); setStatus("");
+    } catch (error) {
+      setStatus(controller.signal.aborted ? "Genereren geannuleerd." : error instanceof Error ? error.message : "Genereren mislukt.");
+    } finally {
+      abort.current = undefined;
+      setBusy(false);
+    }
   };
   const savePlayer = useCallback((state: PlayerState) => {
     setPlayerState(state);
-    setPuzzle((current) => { if (current) storeValue("player", { puzzle: current, state }); return current; });
+    setPuzzle((current) => { if (current) storeValue("player", { puzzle: current, state, recentPuzzles: recentPuzzles.current }); return current; });
   }, []);
   const print = (job: PrintJob) => { setPrintJob(job); window.setTimeout(() => window.print(), 50); };
 
@@ -63,7 +71,9 @@ export default function App() {
               <label className="check-option" title={theme === "animals_familiar" ? "De lijst met bekende dieren bevat geen Q." : undefined}><input type="checkbox" checked={requireEveryLetter} onChange={(event) => setRequireEveryLetter(event.target.checked)} disabled={busy || theme === "animals_familiar"} />Alle 26 letters gebruiken</label>
               <label className="check-option" title={theme !== "general" ? "Dierenpuzzels gebruiken uitsluitend diernamen." : undefined}><input type="checkbox" checked={includeProperNames} onChange={(event) => setIncludeProperNames(event.target.checked)} disabled={busy || theme !== "general"} />Eigennamen toestaan</label>
             </div>
-            <button onClick={generate} disabled={busy}>{busy ? "Bezig met genereren…" : "Nieuwe puzzel"}</button>{status && <p className="status" role="status">{status}</p>}
+            <button onClick={generate} disabled={busy}>{busy ? "Bezig met genereren…" : "Nieuwe puzzel"}</button>
+            {busy && <button className="secondary" onClick={() => abort.current?.abort()}>Annuleren</button>}
+            {status && <p className="status" role="status">{status}</p>}
           </section>
           {puzzle && <Player key={puzzle.puzzleId} puzzle={puzzle} saved={playerState} onSave={savePlayer} onPrint={() => print({ puzzles: [puzzle], cover: false })} />}
         </> : <BookletBuilder initial={savedBooklet} onSave={(value) => storeValue("booklet", value)} onPrint={(title, puzzles) => print({ title, puzzles, cover: true })} />}

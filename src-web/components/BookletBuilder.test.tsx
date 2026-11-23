@@ -73,6 +73,7 @@ describe("BookletBuilder", () => {
     fireEvent.click(screen.getByRole("button", { name: "Boekje genereren" }));
     await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
     expect(requestPuzzle).toHaveBeenCalledTimes(50);
+    expect(vi.mocked(requestPuzzle).mock.calls[49][1]?.previousPuzzles).toHaveLength(49);
 
     fireEvent.change(screen.getByLabelText("Bekende dieren, niveau 1"), { target: { value: "1" } });
     fireEvent.click(screen.getByRole("button", { name: "Boekje genereren" }));

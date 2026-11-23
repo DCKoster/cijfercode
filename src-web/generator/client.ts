@@ -4,6 +4,7 @@ let worker: Worker | undefined;
 const pending = new Map<string, {
   resolve: (puzzle: PuzzleDocument) => void;
   reject: (error: Error) => void;
+  dispose: () => void;
   progress?: (attempt: number, maximum: number) => void;
 }>();
 
@@ -14,10 +15,15 @@ function getWorker(): Worker {
     const message = event.data;
     const task = pending.get(message.requestId);
     if (!task) return;
-    if (message.type === "progress") task.progress?.(message.attempt, message.maximum);
-    if (message.type === "result") { pending.delete(message.requestId); task.resolve(message.puzzle); }
-    if (message.type === "error") { pending.delete(message.requestId); task.reject(new Error(message.message)); }
-    if (message.type === "cancelled") { pending.delete(message.requestId); task.reject(new DOMException("Geannuleerd", "AbortError")); }
+    if (message.type === "progress") {
+      task.progress?.(message.attempt, message.maximum);
+      return;
+    }
+    pending.delete(message.requestId);
+    task.dispose();
+    if (message.type === "result") task.resolve(message.puzzle);
+    if (message.type === "error") task.reject(new Error(message.message));
+    if (message.type === "cancelled") task.reject(new DOMException("Geannuleerd", "AbortError"));
   };
   return worker;
 }
@@ -26,14 +32,23 @@ export function requestPuzzle(
   difficulty: Difficulty,
   options: Partial<GenerationOptions> & { seed?: string; signal?: AbortSignal; previousPuzzles?: readonly PuzzleSignature[]; onProgress?: (attempt: number, maximum: number) => void } = {},
 ): Promise<PuzzleDocument> {
+  const { signal } = options;
+  if (signal?.aborted) return Promise.reject(new DOMException("Geannuleerd", "AbortError"));
   const requestId = crypto.randomUUID();
   const seed = options.seed ?? crypto.randomUUID();
   return new Promise((resolve, reject) => {
-    pending.set(requestId, { resolve, reject, progress: options.onProgress });
-    options.signal?.addEventListener("abort", () => {
+    const worker = getWorker();
+    const abort = () => {
       const message: WorkerRequest = { type: "cancel", requestId };
-      getWorker().postMessage(message);
-    }, { once: true });
+      worker.postMessage(message);
+    };
+    pending.set(requestId, {
+      resolve: (puzzle) => signal?.aborted ? reject(new DOMException("Geannuleerd", "AbortError")) : resolve(puzzle),
+      reject,
+      progress: options.onProgress,
+      dispose: () => signal?.removeEventListener("abort", abort),
+    });
+    signal?.addEventListener("abort", abort, { once: true });
     const message: WorkerRequest = {
       type: "generate", requestId, difficulty, seed, previousPuzzles: options.previousPuzzles,
       options: {
@@ -43,6 +58,6 @@ export function requestPuzzle(
         generationMode: options.generationMode ?? "interactive",
       },
     };
-    getWorker().postMessage(message);
+    worker.postMessage(message);
   });
 }

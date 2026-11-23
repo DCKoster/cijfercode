@@ -1,5 +1,6 @@
 import type { Entry, GenerationOptions, LetterCell } from "../types";
 import { SeededRandom } from "./random";
+import { generationSlice } from "./slice";
 import { GRID_HEIGHT, GRID_WIDTH, type LayoutSlot } from "./layout";
 
 export interface FillWord { word: string; score: number }
@@ -10,21 +11,47 @@ type Candidate = FillWord & { letters: number[]; mask: number };
 type Domains = Candidate[][];
 interface Crossing { position: number; other: number; otherPosition: number }
 
-function createDomains(slots: LayoutSlot[], wordsByLength: ReadonlyMap<number, FillWord[]>, random?: SeededRandom): Domains {
-  const byLength = new Map<number, Candidate[]>();
-  return slots.map((slot) => {
-    let domain = byLength.get(slot.length);
-    if (!domain) {
-      const words = wordsByLength.get(slot.length) ?? [];
-      const ordered = random ? random.shuffle([...words]) : words;
-      domain = ordered.map(({ word, score }) => {
-        const letters = Array.from(word, (letter) => letter.charCodeAt(0) - 65);
-        return { word, score, letters, mask: letters.reduce((mask, letter) => mask | (1 << letter), 0) };
-      });
-      byLength.set(slot.length, domain);
+export interface FillDictionary {
+  domains: ReadonlyMap<number, Candidate[]>;
+  available: ReadonlyMap<number, number>;
+  positions: number[][];
+  counts: Uint32Array[][];
+  rare: number;
+}
+
+export function indexFillWords(wordsByLength: ReadonlyMap<number, FillWord[]>): FillDictionary {
+  const domains = new Map<number, Candidate[]>();
+  const counts: Uint32Array[][] = [];
+  const positions: number[][] = [];
+  const letterCounts = new Uint32Array(26);
+  let total = 0;
+  for (let length = 3; length <= GRID_HEIGHT; length += 1) {
+    const seen = new Set<string>();
+    counts[length] = Array.from({ length }, () => new Uint32Array(26));
+    positions[length] = Array(length).fill(0);
+    const candidates: Candidate[] = [];
+    for (const { word, score } of wordsByLength.get(length) ?? []) {
+      if (word.length !== length || !/^[A-Z]+$/.test(word) || seen.has(word)) continue;
+      seen.add(word);
+      const letters = Array.from(word, (letter) => letter.charCodeAt(0) - 65);
+      let mask = 0;
+      for (const [position, letter] of letters.entries()) {
+        const bit = 1 << letter;
+        counts[length][position][letter] += 1;
+        positions[length][position] |= bit;
+        mask |= bit;
+      }
+      for (let bits = mask; bits; bits &= bits - 1) letterCounts[31 - Math.clz32(bits & -bits)] += 1;
+      candidates.push({ word, score, letters, mask });
     }
-    return domain;
-  });
+    total += candidates.length;
+    domains.set(length, candidates);
+  }
+  let rare = 0;
+  for (const [letter, count] of letterCounts.entries()) {
+    if (count <= total * 0.08) rare |= 1 << letter;
+  }
+  return { domains, available: new Map(Array.from(domains, ([length, words]) => [length, words.length])), positions, counts, rare };
 }
 
 function slotCrossings(slots: LayoutSlot[]): Crossing[][] {
@@ -45,12 +72,16 @@ function slotCrossings(slots: LayoutSlot[]): Crossing[][] {
   return crossings;
 }
 
-function propagate(domains: Domains, crossings: Crossing[][], slotsByLength: number[][], changed: number[]): boolean {
+function propagate(domains: Domains, crossings: Crossing[][], slotsByLength: number[][], changed: number[], conflicts?: Set<number>): boolean {
   const queued = new Uint8Array(domains.length);
   for (const slot of changed) queued[slot] = 1;
   const queue = [...changed];
   const update = (slot: number, domain: Candidate[]) => {
-    if (!domain.length) return false;
+    if (!domain.length) {
+      if (!conflicts) return false;
+      conflicts.add(slot);
+      return true;
+    }
     if (domain.length === domains[slot].length) return true;
     domains[slot] = domain;
     if (!queued[slot]) {
@@ -63,7 +94,11 @@ function propagate(domains: Domains, crossings: Crossing[][], slotsByLength: num
     const slot = queue[index];
     queued[slot] = 0;
     const domain = domains[slot];
-    if (!domain.length) return false;
+    if (!domain.length) {
+      if (!conflicts) return false;
+      conflicts.add(slot);
+      continue;
+    }
     if (domain.length === 1) {
       const word = domain[0].word;
       for (const other of slotsByLength[domain[0].letters.length]) {
@@ -86,18 +121,96 @@ function groupSlotsByLength(slots: LayoutSlot[]): number[][] {
   return groups;
 }
 
+function distinctWordsPossible(domains: Domains, groups: number[][]): boolean {
+  for (const group of groups) {
+    // At most group.length - 1 words can be claimed by other slots.
+    const scarce = group.filter((slot) => domains[slot].length < group.length)
+      .sort((left, right) => domains[left].length - domains[right].length);
+    const assigned = new Map<string, number>();
+    const assign = (slot: number, seen: Set<string>): boolean => {
+      for (const { word } of domains[slot]) {
+        if (seen.has(word)) continue;
+        seen.add(word);
+        const other = assigned.get(word);
+        if (other === undefined || assign(other, seen)) {
+          assigned.set(word, slot);
+          return true;
+        }
+      }
+      return false;
+    };
+    if (!scarce.every((slot) => assign(slot, new Set()))) return false;
+  }
+  return true;
+}
+
+function supportedLetters(domains: Domains): number {
+  let supported = 0;
+  for (const domain of domains) for (const { mask } of domain) {
+    supported |= mask;
+    if (supported === ALPHABET) return supported;
+  }
+  return supported;
+}
+
+export function fillPenalty(slots: LayoutSlot[], dictionary: FillDictionary, requireEveryLetter: boolean) {
+  const domains = slots.map(({ length }) => dictionary.domains.get(length) ?? []);
+  const crossings = slotCrossings(slots);
+  const slotsByLength = groupSlotsByLength(slots);
+  const conflicts = new Set<number>();
+  propagate(domains, crossings, slotsByLength, slots.map((_, index) => index), conflicts);
+  let cost = 0;
+  if (requireEveryLetter) {
+    const supported = supportedLetters(domains);
+    for (let missing = ALPHABET & ~supported; missing; missing &= missing - 1) cost += 14;
+  }
+  const cells = [...conflicts].flatMap((slot) => slots[slot].positions.map(([row, column]) => row * GRID_WIDTH + column));
+  return { cost: conflicts.size * 5 + cost + (distinctWordsPossible(domains, slotsByLength) ? 0 : 8), cells };
+}
+
+export function prepareFill(slots: LayoutSlot[], dictionary: FillDictionary, requireEveryLetter: boolean) {
+  const domains = slots.map(({ length }) => dictionary.domains.get(length) ?? []);
+  const crossings = slotCrossings(slots);
+  const slotsByLength = groupSlotsByLength(slots);
+  if (!propagate(domains, crossings, slotsByLength, slots.map((_, index) => index))
+    || (requireEveryLetter && supportedLetters(domains) !== ALPHABET)
+    || !distinctWordsPossible(domains, slotsByLength)) return null;
+  if (requireEveryLetter && !rarePlacementsPossible(domains, crossings, slotsByLength, dictionary.rare)) return null;
+  return { domains, crossings, slotsByLength };
+}
+
+function rarePlacementsPossible(domains: Domains, crossings: Crossing[][], slotsByLength: number[][], rare: number): boolean {
+  const placements: Array<Array<[number, Candidate]>> = Array.from({ length: 26 }, () => []);
+  for (const [slot, domain] of domains.entries()) {
+    for (const candidate of domain) {
+      for (let bits = candidate.mask & rare; bits; bits &= bits - 1) {
+        const candidates = placements[31 - Math.clz32(bits & -bits)];
+        if (candidates.length <= 6) candidates.push([slot, candidate]);
+      }
+    }
+  }
+  const tightest = placements.filter((placed) => placed.length > 0 && placed.length <= 6)
+    .sort((left, right) => left.length - right.length)[0];
+  // Each of these branches is necessary to place the rarest letter.
+  return !tightest || tightest.some(([slot, candidate]) => {
+    const branch = [...domains];
+    branch[slot] = [candidate];
+    return propagate(branch, crossings, slotsByLength, [slot])
+      && supportedLetters(branch) === ALPHABET && distinctWordsPossible(branch, slotsByLength);
+  });
+}
+
 export async function fillSlots(
   slots: LayoutSlot[],
-  wordsByLength: ReadonlyMap<number, FillWord[]>,
+  prepared: NonNullable<ReturnType<typeof prepareFill>>,
   random: SeededRandom,
   options: GenerationOptions,
   nodeBudget: number,
   cancelled?: () => boolean,
   diversity?: { answerFrequency: ReadonlyMap<string, number>; acceptsAnswers: (words: string[]) => boolean },
 ): Promise<FillResult | null> {
-  const domains = createDomains(slots, wordsByLength, random);
-  const crossings = slotCrossings(slots);
-  const slotsByLength = groupSlotsByLength(slots);
+  const { domains, crossings, slotsByLength } = prepared;
+  const slice = generationSlice(cancelled);
   let nodes = 0;
   const letterCounts = new WeakMap<Candidate[], Uint16Array>();
   const countLetters = (domain: Candidate[]): Uint16Array => {
@@ -114,6 +227,8 @@ export async function fillSlots(
   };
 
   const search = async (current: Domains): Promise<Domains | null> => {
+    const pause = slice();
+    if (pause) await pause;
     let choice = -1;
     let present = 0;
     const unfilled: number[] = [];
@@ -181,13 +296,13 @@ export async function fillSlots(
     for (const { slot, candidate } of placements) {
       if (nodes >= nodeBudget) return null;
       nodes += 1;
-      if ((nodes & 255) === 0) {
-        await new Promise<void>((resolve) => setTimeout(resolve, 0));
-        if (cancelled?.()) throw new Error("Geannuleerd");
+      if ((nodes & 15) === 0) {
+        const pause = slice();
+        if (pause) await pause;
       }
       const next = [...current];
       next[slot] = [candidate];
-      if (!propagate(next, crossings, slotsByLength, [slot])) continue;
+      if (!propagate(next, crossings, slotsByLength, [slot]) || !distinctWordsPossible(next, slotsByLength)) continue;
       const filled = await search(next);
       if (filled) return filled;
     }
@@ -195,7 +310,7 @@ export async function fillSlots(
   };
 
   if (cancelled?.()) throw new Error("Geannuleerd");
-  if (nodeBudget < 1 || !propagate(domains, crossings, slotsByLength, slots.map((_, index) => index))) return null;
+  if (nodeBudget < 1) return null;
   const filled = await search(domains);
   if (!filled) return null;
   const grid: LetterCell[][] = Array.from({ length: GRID_HEIGHT }, () => Array(GRID_WIDTH).fill(null));

@@ -1,13 +1,15 @@
-import { normalizeTheme, type Cell, type Difficulty, type Entry, type GenerationOptions, type LetterCell, type LexiconData, type PuzzleDocument, type PuzzleSignature, type SolverMetrics } from "../types";
+import { normalizeTheme, type Cell, type Difficulty, type Entry, type GenerationDiagnostics, type GenerationOptions, type LetterCell, type LexiconData, type PuzzleDocument, type PuzzleSignature, type SolverMetrics } from "../types";
 import { SeededRandom } from "./random";
-import { fillSlots, type FillWord } from "./fill";
-import { puzzleLayouts } from "./layout";
+import { fillSlots, indexFillWords, prepareFill, type FillWord } from "./fill";
+import { acceptsLayout, assessBlockMask, layoutPattern, layoutProfile, templateOrientations, type LayoutSlot } from "./layout";
+import { layoutDictionaryScores, PROCEDURAL_RESTARTS, searchMasks, TEMPLATE_ATTEMPTS } from "./proceduralLayout";
+import { generationSlice } from "./slice";
 
 const WIDTH = 17 as const;
 const HEIGHT = 20 as const;
 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const MINIMUM_INDEPENDENT_LOOPS = 3;
-const GENERATOR_VERSION = "web-6";
+const GENERATOR_VERSION = "web-7";
 const DEFAULT_OPTIONS: GenerationOptions = { theme: "general", requireEveryLetter: false, includeProperNames: false, generationMode: "interactive" };
 const PROFILES: Record<Difficulty, { minimumScore: number; hints: number; maxNodes: number }> = {
   1: { minimumScore: 4, hints: 3, maxNodes: 100 },
@@ -173,11 +175,20 @@ function matchesDifficulty(difficulty: Difficulty, metrics: SolverMetrics, optio
   return metrics.searchNodes <= 5000;
 }
 
-export async function generatePuzzle(difficulty: Difficulty, seed: string, lexicon: LexiconData, onProgress?: (attempt: number, maximum: number) => void, cancelled?: () => boolean, requestedOptions: Partial<GenerationOptions> = {}, previousPuzzles: readonly PuzzleSignature[] = []): Promise<PuzzleDocument> {
+export function distinctAnswerCount(left: ReadonlySet<string>, right: ReadonlySet<string>): number {
+  const [smaller, larger] = left.size <= right.size ? [left, right] : [right, left];
+  let distinct = 0;
+  for (const word of smaller) if (!larger.has(word)) distinct += 1;
+  return distinct;
+}
+
+export async function generatePuzzle(difficulty: Difficulty, seed: string, lexicon: LexiconData, onProgress?: (attempt: number, maximum: number) => void, cancelled?: () => boolean, requestedOptions: Partial<GenerationOptions> = {}, previousPuzzles: readonly PuzzleSignature[] = [], onDiagnostics?: (diagnostics: GenerationDiagnostics) => void): Promise<PuzzleDocument> {
   const options = { ...DEFAULT_OPTIONS, ...requestedOptions, theme: normalizeTheme(requestedOptions.theme) };
   if (options.theme === "animals_familiar" && options.requireEveryLetter) {
     throw new Error("Bekende dieren kan niet met alle 26 letters worden gecombineerd, omdat deze woordenlijst geen Q bevat.");
   }
+  const slice = generationSlice(cancelled);
+  await slice(true);
   const profile = PROFILES[difficulty];
   const optionKey = `${options.theme}:${Number(options.requireEveryLetter)}:${Number(options.includeProperNames)}:${options.generationMode}`;
   const random = new SeededRandom(`cijfercode-${GENERATOR_VERSION}:${seed}:${difficulty}:${optionKey}`);
@@ -194,8 +205,9 @@ export async function generatePuzzle(difficulty: Difficulty, seed: string, lexic
       .filter(([word], index) => index < limit || (options.requireEveryLetter && /[QXY]/.test(word)))
       .map(([word, score]) => ({ word, score })));
   }
-  const availableByLength = new Map(Array.from(wordsByLength, ([length, words]) => [length, words.length]));
-  const previousLayouts = new Set(previousPuzzles.map(({ layout }) => layout));
+  const dictionary = indexFillWords(wordsByLength);
+  const layoutScores = layoutDictionaryScores(dictionary, options.requireEveryLetter, options.theme !== "general");
+  const previousLayouts = previousPuzzles.map(({ layout }) => layout);
   const previousAnswers = previousPuzzles.map(({ answers }) => new Set(answers));
   const answerFrequency = new Map<string, number>();
   for (const answers of previousAnswers) {
@@ -203,21 +215,24 @@ export async function generatePuzzle(difficulty: Difficulty, seed: string, lexic
   }
   const diversity = previousAnswers.length ? {
     answerFrequency,
-    acceptsAnswers: (words: string[]) => previousAnswers.every((answers) => {
-      let different = Math.min(answers.size, words.length);
-      for (const word of words) if (answers.has(word)) different -= 1;
-      return different >= 3;
-    }),
+    acceptsAnswers: (words: string[]) => {
+      const current = new Set(words);
+      return previousAnswers.every((answers) => distinctAnswerCount(answers, current) >= 3);
+    },
   } : undefined;
-  const { maximum, layouts } = puzzleLayouts(random, options, availableByLength, previousLayouts);
-  let attempt = 0;
-  for (const slots of layouts) {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    if (cancelled?.()) throw new Error("Geannuleerd");
-    onProgress?.(++attempt, maximum);
-    if (independentCrossingLoops(slots) < MINIMUM_INDEPENDENT_LOOPS) continue;
-    const fill = await fillSlots(slots, wordsByLength, random, options, 1_500, cancelled, diversity);
-    if (!fill) continue;
+  const diagnostics: GenerationDiagnostics = {
+    fallbackEntered: false, proceduralRestarts: 0, proceduralFills: 0, templateAttempts: 0,
+  };
+  const maximum = PROCEDURAL_RESTARTS + TEMPLATE_ATTEMPTS;
+  let puzzle: PuzzleDocument | undefined;
+
+  const trySlots = async (slots: LayoutSlot[], source: "procedural" | "template") => {
+    if (independentCrossingLoops(slots) < MINIMUM_INDEPENDENT_LOOPS) return "skip";
+    const prepared = prepareFill(slots, dictionary, options.requireEveryLetter);
+    if (!prepared) return "skip";
+    if (source === "procedural") diagnostics.proceduralFills += 1;
+    const fill = await fillSlots(slots, prepared, random, options, 1_500, cancelled, diversity);
+    if (!fill) return "filled";
     const shuffled = random.shuffle(LETTERS.split(""));
     const codeToLetter: Record<number, string> = Object.fromEntries(shuffled.map((letter, index) => [index + 1, letter]));
     const letterToCode = Object.fromEntries(Object.entries(codeToLetter).map(([code, letter]) => [letter, Number(code)]));
@@ -225,17 +240,45 @@ export async function generatePuzzle(difficulty: Difficulty, seed: string, lexic
     const frequencies = new Map<number, number>();
     grid.flat().forEach((code) => { if (code !== null) frequencies.set(code, (frequencies.get(code) ?? 0) + 1); });
     const givenCodes = selectGivenCodes(frequencies, codeToLetter, profile.hints, random);
-    if (givenCodes.length < profile.hints) continue;
+    if (givenCodes.length < profile.hints) return "filled";
     const givens = Object.fromEntries(givenCodes.map((code) => [code, codeToLetter[code]]));
     const solved = solve(grid, givens, solverWords, options.theme !== "general" ? 5000 : profile.maxNodes);
-    if (!matchesDifficulty(difficulty, solved.metrics, options)) continue;
-    return {
+    if (!matchesDifficulty(difficulty, solved.metrics, options)) return "filled";
+    puzzle = {
       schemaVersion: 4, generatorVersion: GENERATOR_VERSION, lexiconVersion: lexicon.version,
       puzzleId: hashId(`${seed}:${difficulty}:${optionKey}:${JSON.stringify(grid)}:${JSON.stringify(givens)}`), seed, difficulty,
       theme: options.theme, requireEveryLetter: options.requireEveryLetter, includeProperNames: options.includeProperNames,
       width: WIDTH, height: HEIGHT, grid, givens, measured: solved.metrics,
       solution: { grid: fill.grid, codeToLetter, entries: fill.entries },
     };
+    diagnostics.source = source;
+    return "accepted";
+  };
+
+  try {
+    for (let restart = 0; restart < PROCEDURAL_RESTARTS; restart += 1) {
+      diagnostics.proceduralRestarts += 1;
+      onProgress?.(diagnostics.proceduralRestarts, maximum);
+      if (await searchMasks(random, layoutProfile(options), layoutScores, previousLayouts, slice,
+        (slots) => trySlots(slots, "procedural"))) return puzzle!;
+    }
+    diagnostics.fallbackEntered = true;
+    const seen = new Set<string>();
+    for (const { mask, profile } of templateOrientations(random, options)) {
+      const pause = slice();
+      if (pause) await pause;
+      const pattern = layoutPattern(mask);
+      if (seen.has(pattern) || !acceptsLayout(pattern, previousLayouts)) continue;
+      seen.add(pattern);
+      const assessment = assessBlockMask(mask, profile, dictionary.available);
+      if (!assessment.valid || independentCrossingLoops(assessment.slots) < MINIMUM_INDEPENDENT_LOOPS) continue;
+      diagnostics.templateAttempts += 1;
+      onProgress?.(PROCEDURAL_RESTARTS + diagnostics.templateAttempts, maximum);
+      if (await trySlots(assessment.slots, "template") === "accepted") return puzzle!;
+      if (diagnostics.templateAttempts >= TEMPLATE_ATTEMPTS) break;
+    }
+  } finally {
+    onDiagnostics?.(diagnostics);
   }
   const guarantee = options.requireEveryLetter ? " met alle 26 letters" : "";
   const subject = options.theme !== "general" ? "dierenpuzzel" : "puzzel";

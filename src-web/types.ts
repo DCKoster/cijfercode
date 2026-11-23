@@ -41,7 +41,7 @@ export interface SolverMetrics {
 
 export interface PuzzleDocument {
   schemaVersion: 4;
-  generatorVersion: "web-3" | "web-4" | "web-5" | "web-6";
+  generatorVersion: "web-3" | "web-4" | "web-5" | "web-6" | "web-7";
   lexiconVersion: string;
   puzzleId: string;
   seed: string;
@@ -110,8 +110,16 @@ export type WorkerRequest =
   | { type: "generate"; requestId: string; difficulty: Difficulty; options: GenerationOptions; seed: string; previousPuzzles?: readonly PuzzleSignature[] }
   | { type: "cancel"; requestId: string };
 
+export interface GenerationDiagnostics {
+  fallbackEntered: boolean;
+  source?: "procedural" | "template";
+  proceduralRestarts: number;
+  proceduralFills: number;
+  templateAttempts: number;
+}
+
 export type WorkerResponse =
   | { type: "progress"; requestId: string; attempt: number; maximum: number }
-  | { type: "result"; requestId: string; puzzle: PuzzleDocument }
-  | { type: "error"; requestId: string; message: string }
-  | { type: "cancelled"; requestId: string };
+  | { type: "result"; requestId: string; puzzle: PuzzleDocument; diagnostics: GenerationDiagnostics }
+  | { type: "error"; requestId: string; message: string; diagnostics?: GenerationDiagnostics }
+  | { type: "cancelled"; requestId: string; diagnostics?: GenerationDiagnostics };

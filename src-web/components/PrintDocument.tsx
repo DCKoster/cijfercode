@@ -19,7 +19,6 @@ export function PrintDocument({ job }: { job: PrintJob | null }) {
         <h1>{job.title || "Mijn puzzelboek"}</h1>
         <div className="cover-meta">
           <span><strong>{job.puzzles.length}</strong>{job.puzzles.length === 1 ? "puzzel" : "puzzels"}</span>
-          <span><strong>{levels.length === 1 ? `Niveau ${levels[0]}` : `Niveaus ${levels.join(", ")}`}</strong>{levels.length === 1 ? "moeilijkheid" : "moeilijkheden"}</span>
         </div>
         <div className="cover-themes" aria-label="Thema's">{themes.map((theme) => <span key={theme}>{theme}</span>)}</div>
       </div>

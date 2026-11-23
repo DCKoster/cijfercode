@@ -163,143 +163,61 @@ export function assessBlockMask(mask: BlockMask, profile: LayoutProfile, availab
 }
 
 const REFLECTIONS = [[false, false], [true, false], [false, true], [true, true]] as const;
-const EDIT_ATTEMPT_LIMIT = 160;
+const REFLECTION_INDICES = REFLECTIONS.map(([flipRows, flipColumns]) =>
+  Array.from({ length: GRID_HEIGHT * GRID_WIDTH }, (_, index) => {
+    const row = Math.floor(index / GRID_WIDTH);
+    const column = index % GRID_WIDTH;
+    return (flipRows ? GRID_HEIGHT - 1 - row : row) * GRID_WIDTH + (flipColumns ? GRID_WIDTH - 1 - column : column);
+  }));
 
-function blockPattern(mask: BlockMask): string {
+export const MIN_LAYOUT_DISTANCE = 12;
+
+export function layoutPattern(mask: BlockMask): string {
   return mask.map((row) => row.map((block) => block ? "#" : ".").join("")).join("");
 }
 
-function patternDistance(left: string, right: string): number {
-  let difference = 0;
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] !== right[index]) difference += 1;
+export function layoutDistance(left: string, right: string): number {
+  let minimum = GRID_HEIGHT * GRID_WIDTH;
+  for (const reflection of REFLECTION_INDICES) {
+    let distance = 0;
+    for (let index = 0; index < left.length && distance < minimum; index += 1) {
+      if (left[index] !== right[reflection[index]]) distance += 1;
+    }
+    minimum = Math.min(minimum, distance);
   }
-  return difference;
+  return minimum;
 }
 
-function createsTwoCellRun(block: boolean, line: boolean[], index: number): boolean {
-  let before = index - 1;
-  while (before >= 0 && !line[before]) before -= 1;
-  let after = index + 1;
-  while (after < line.length && !line[after]) after += 1;
-  return block ? after - before === 3 : index - before === 3 || after - index === 3;
+export function acceptsLayout(pattern: string, previous: readonly string[]): boolean {
+  return previous.every((earlier) => earlier.length !== pattern.length || layoutDistance(pattern, earlier) >= MIN_LAYOUT_DISTANCE);
 }
 
-export function puzzleLayouts(
-  random: SeededRandom,
-  { theme, generationMode }: GenerationOptions,
-  availableByLength: ReadonlyMap<number, number>,
-  previousLayouts: ReadonlySet<string> = new Set(),
-) {
-  const groups = [{ profile: LAYOUT_PROFILES[generationMode], templates: LAYOUT_TEMPLATES[generationMode][theme] }];
+export function layoutProfile({ theme, generationMode }: GenerationOptions): LayoutProfile {
+  return generationMode === "booklet" && theme !== "general"
+    ? LAYOUT_PROFILES.animalBooklet : LAYOUT_PROFILES[generationMode];
+}
+
+export function* templateOrientations(random: SeededRandom, options: GenerationOptions) {
+  const { theme, generationMode } = options;
+  const groups = [{ profile: layoutProfile(options), templates: LAYOUT_TEMPLATES[generationMode][theme] }];
   if (generationMode === "booklet" && theme !== "general") {
-    groups[0].profile = LAYOUT_PROFILES.animalBooklet;
     groups.push({ profile: LAYOUT_PROFILES.interactive, templates: LAYOUT_TEMPLATES.interactive[theme] });
   }
-  const baseCount = groups.reduce((total, { templates }) => total + templates.length * REFLECTIONS.length, 0);
-  const maximum = previousLayouts.size ? baseCount + EDIT_ATTEMPT_LIMIT : baseCount * 2;
-
-  function* starts() {
+  const reflected = random.shuffle(REFLECTIONS.slice(1));
+  // The animal dictionaries fit the original orientation more often.
+  for (const orientations of [theme === "general" ? random.shuffle([...REFLECTIONS]) : REFLECTIONS.slice(0, 1),
+    theme === "general" ? [] : reflected]) {
     for (const { profile, templates } of groups) {
       for (const template of random.shuffle([...templates])) {
         const rows = template.trim().split(/\s+/);
-        // The animal dictionaries fit the original orientation more often.
-        const reflections = theme === "general"
-          ? random.shuffle([...REFLECTIONS])
-          : [REFLECTIONS[0], ...random.shuffle(REFLECTIONS.slice(1))];
-        for (const [flipRows, flipColumns] of reflections) {
+        for (const [flipRows, flipColumns] of orientations) {
           const mask = (flipRows ? [...rows].reverse() : rows).map((row) => {
             const cells = Array.from(row, (cell) => cell === "#");
             return flipColumns ? cells.reverse() : cells;
           });
-          yield { mask, profile, reflected: flipRows || flipColumns };
+          yield { mask, profile };
         }
       }
     }
   }
-
-  function* layouts(): Generator<LayoutSlot[]> {
-    const seen = new Set(previousLayouts);
-    const unused = (mask: BlockMask, profile: LayoutProfile) => {
-      const pattern = blockPattern(mask);
-      if (seen.has(pattern)) return;
-      const assessment = assessBlockMask(mask, profile, availableByLength);
-      if (!assessment.valid) return;
-      seen.add(pattern);
-      return assessment.slots;
-    };
-
-    if (!previousLayouts.size) {
-      for (const { mask, profile } of starts()) {
-        const variant = mask.map((row) => [...row]);
-        for (let edit = 0; edit < 10; edit += 1) {
-          const row = random.integer(GRID_HEIGHT), column = random.integer(GRID_WIDTH);
-          variant[row][column] = !variant[row][column];
-          if (!assessBlockMask(variant, profile, availableByLength).valid) {
-            variant[row][column] = !variant[row][column];
-          }
-        }
-        const changed = unused(variant, profile);
-        if (changed) yield changed;
-        const base = unused(mask, profile);
-        if (base) yield base;
-      }
-      return;
-    }
-
-    const previous = [...previousLayouts];
-    const ranked = [...starts()].map((start) => {
-      const pattern = blockPattern(start.mask);
-      const distances = previous.map((used) => patternDistance(pattern, used));
-      return { ...start, pattern, distance: Math.min(...distances) };
-    }).sort((left, right) => right.distance - left.distance);
-    const preferred = theme === "general" ? ranked : ranked.filter(({ reflected }) => !reflected);
-    for (const { mask, profile } of preferred) {
-      const slots = unused(mask, profile);
-      if (slots) yield slots;
-    }
-
-    // Use the selected layouts as additional starting points for new block patterns.
-    const startingPatterns = new Set(ranked.map(({ pattern }) => pattern));
-    const accepted = previous.filter((pattern) => !startingPatterns.has(pattern)).flatMap((pattern) => {
-      const mask = Array.from({ length: GRID_HEIGHT }, (_, row) =>
-        Array.from(pattern.slice(row * GRID_WIDTH, (row + 1) * GRID_WIDTH), (cell) => cell === "#"));
-      const group = groups.find(({ profile }) => assessBlockMask(mask, profile, availableByLength).valid);
-      return group ? [{ mask, profile: group.profile, pattern }] : [];
-    });
-    const editable = [
-      ...ranked.filter(({ reflected, pattern }) => !reflected || previousLayouts.has(pattern)),
-      ...accepted,
-    ];
-    const cells = random.shuffle(Array.from({ length: GRID_WIDTH * GRID_HEIGHT }, (_, index) => index));
-    function* editedLayouts() {
-      let edits = 0;
-      for (const { mask, profile } of editable) {
-        const columns = Array.from({ length: GRID_WIDTH }, (_, column) => mask.map((row) => row[column]));
-        for (const cell of cells) {
-          const row = Math.floor(cell / GRID_WIDTH), column = cell % GRID_WIDTH;
-          const block = mask[row][column];
-          if (createsTwoCellRun(block, mask[row], column) || createsTwoCellRun(block, columns[column], row)) continue;
-          mask[row][column] = !block;
-          const slots = unused(mask, profile);
-          mask[row][column] = block;
-          if (slots) {
-            yield slots;
-            if (++edits >= EDIT_ATTEMPT_LIMIT) return;
-          }
-        }
-      }
-    }
-    yield* editedLayouts();
-
-    if (theme !== "general") {
-      for (const { mask, profile, reflected } of ranked) {
-        if (!reflected) continue;
-        const slots = unused(mask, profile);
-        if (slots) yield slots;
-      }
-    }
-  }
-
-  return { maximum, layouts: layouts() };
 }

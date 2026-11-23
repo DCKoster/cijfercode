@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { blockClusterSizes, connectedOpenCells, countOpenAreasLargerThanTwoByTwo, countOpenThreeByThreeAreas, countTwoCellRuns, extractSlots, lengthDistribution, assessBlockMask, GRID_HEIGHT, GRID_WIDTH, LAYOUT_PROFILES } from "./layout";
+import { acceptsLayout, layoutDistance, layoutPattern, blockClusterSizes, connectedOpenCells, countOpenAreasLargerThanTwoByTwo, countOpenThreeByThreeAreas, countTwoCellRuns, extractSlots, lengthDistribution, assessBlockMask, GRID_HEIGHT, GRID_WIDTH, LAYOUT_PROFILES } from "./layout";
 
 describe("dense block layouts", () => {
   it("extracts horizontal and vertical slots and measures their lengths", () => {
@@ -11,6 +11,20 @@ describe("dense block layouts", () => {
     expect(slots.map((slot) => [slot.direction, slot.length])).toEqual([["across", 5], ["down", 8]]);
     expect(lengthDistribution(slots)).toEqual({ short: 1, medium: 1, long: 0 });
     expect(connectedOpenCells(mask)).toBe(12);
+  });
+
+  it("rejects mirrors and edits within eleven cells", () => {
+    const mask = Array.from({ length: GRID_HEIGHT }, (_, row) =>
+      Array.from({ length: GRID_WIDTH }, (_, column) => (row * 13 + column * 7 + row * column) % 17 < 6));
+    const pattern = layoutPattern(mask);
+    for (const flipRows of [false, true]) for (const flipColumns of [false, true]) {
+      const reflected = (flipRows ? [...mask].reverse() : mask).map((row) => flipColumns ? [...row].reverse() : [...row]);
+      expect(layoutDistance(layoutPattern(reflected), pattern)).toBe(0);
+      for (let index = 0; index < 11; index += 1) reflected[0][index] = !reflected[0][index];
+      expect(acceptsLayout(layoutPattern(reflected), [pattern])).toBe(false);
+      reflected[0][11] = !reflected[0][11];
+      expect(acceptsLayout(layoutPattern(reflected), [pattern])).toBe(true);
+    }
   });
 
   it("rejects disconnected and unsupported masks", () => {
