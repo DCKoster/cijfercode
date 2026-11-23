@@ -93,6 +93,7 @@ export async function fillSlots(
   options: GenerationOptions,
   nodeBudget: number,
   cancelled?: () => boolean,
+  diversity?: { answerFrequency: ReadonlyMap<string, number>; acceptsAnswers: (words: string[]) => boolean },
 ): Promise<FillResult | null> {
   const domains = createDomains(slots, wordsByLength, random);
   const crossings = slotCrossings(slots);
@@ -129,7 +130,10 @@ export async function fillSlots(
       }
     }
     const missing = options.requireEveryLetter ? ALPHABET & ~present : 0;
-    if (choice < 0) return missing ? null : current;
+    if (choice < 0) {
+      if (missing || (diversity && !diversity.acceptsAnswers(current.map(([candidate]) => candidate.word)))) return null;
+      return current;
+    }
 
     let required = 0;
     if (missing) {
@@ -165,6 +169,7 @@ export async function fillSlots(
       });
       return words.map((candidate) => {
         let priority = candidate.score + random.next();
+        if (diversity) priority -= 2 * Math.log1p(diversity.answerFrequency.get(candidate.word) ?? 0);
         for (let mask = candidate.mask & missing; mask; mask &= mask - 1) priority += 2;
         for (const [index, { position }] of crossings[slot].entries()) {
           priority += Math.log(support[index][candidate.letters[position]] / current[crossings[slot][index].other].length);

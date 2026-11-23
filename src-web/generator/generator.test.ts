@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import rawLexicon from "../../public/lexicon.json";
-import { normalizeTheme, type Difficulty, type Entry, type LexiconData } from "../types";
+import { normalizeTheme, puzzleSignature, type Difficulty, type Entry, type LexiconData, type PuzzleSignature } from "../types";
 import { candidates, generatePuzzle, independentCrossingLoops, selectGivenCodes } from "./generator";
 import { LAYOUT_PROFILES, assessBlockMask } from "./layout";
 import { SeededRandom } from "./random";
@@ -143,6 +143,22 @@ describe("browser generator", () => {
     expect(puzzle.solution.entries.every(({ word }) => words.has(word))).toBe(true);
     expect(puzzle.measured.solutions).toBe(1);
     if (requireEveryLetter) expect(new Set(puzzle.grid.flat().filter((code) => code !== null)).size).toBe(26);
+  });
+
+  it.each(["booklet", "interactive"] as const)("varies four level-2 familiar-animal puzzles in %s mode", async (generationMode) => {
+    const previous: PuzzleSignature[] = [];
+    for (let index = 0; index < 4; index += 1) {
+      const puzzle = await generatePuzzle(2, "bekende-dieren-herhaling", lexicon, undefined, undefined,
+        { theme: "animals_familiar", generationMode }, previous);
+      const signature = puzzleSignature(puzzle);
+      for (const earlier of previous) {
+        const changedCells = [...signature.layout].filter((cell, position) => cell !== earlier.layout[position]).length;
+        const sharedWords = signature.answers.filter((word) => earlier.answers.includes(word)).length;
+        expect(changedCells).toBeGreaterThanOrEqual(12);
+        expect(Math.min(signature.answers.length, earlier.answers.length) - sharedWords).toBeGreaterThanOrEqual(3);
+      }
+      previous.push(signature);
+    }
   });
 
   it.each(["general", "animals_all"] as const)("can require every letter for %s puzzles", async (theme) => {

@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { requestPuzzle } from "../generator/client";
-import type { Difficulty, PuzzleDocument, Theme } from "../types";
+import { puzzleSignature, type Difficulty, type PuzzleDocument, type Theme } from "../types";
 import { BookletBuilder, normalizeThemeSpecs } from "./BookletBuilder";
 
 vi.mock("../generator/client", () => ({ requestPuzzle: vi.fn() }));
@@ -55,6 +55,9 @@ describe("BookletBuilder", () => {
       [1, "animals_all"], [2, "animals_familiar"],
     ]);
     expect(onSave.mock.calls[0][0].puzzles.map((item: PuzzleDocument) => item.theme)).toEqual(["animals_all", "animals_familiar"]);
+    expect(vi.mocked(requestPuzzle).mock.calls.map(([, options]) => options?.previousPuzzles)).toEqual([
+      [], [puzzleSignature(onSave.mock.calls[0][0].puzzles[0])],
+    ]);
   });
 
   it("accepts 50 puzzles and rejects totals above the limit", async () => {

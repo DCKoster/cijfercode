@@ -1,11 +1,11 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { BookletBuilder } from "./components/BookletBuilder";
 import { DifficultyPicker } from "./components/DifficultyPicker";
 import { Player, type PlayerState } from "./components/Player";
 import { PrintDocument, type PrintJob } from "./components/PrintDocument";
 import { requestPuzzle } from "./generator/client";
 import { loadStored, migrateLegacyStorage, storeValue } from "./storage";
-import { normalizeTheme, type BookletSpec, type Difficulty, type PuzzleDocument, type Theme } from "./types";
+import { normalizeTheme, puzzleSignature, type BookletSpec, type Difficulty, type PuzzleDocument, type PuzzleSignature, type Theme } from "./types";
 
 type Tab = "play" | "booklet";
 interface SavedPlayer { puzzle: PuzzleDocument; state: PlayerState }
@@ -25,12 +25,21 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [printJob, setPrintJob] = useState<PrintJob | null>(null);
+  const recentPuzzles = useRef<PuzzleSignature[]>([]);
   const savedBooklet = loadStored<SavedBooklet | null>("booklet", null);
 
   const generate = async () => {
     setBusy(true); setStatus("Woordenlijst laden…");
     try {
-      const next = await requestPuzzle(difficulty, { theme, requireEveryLetter, includeProperNames: theme === "general" && includeProperNames, onProgress: (attempt) => setStatus(`Puzzel maken · poging ${attempt}`) });
+      const previousPuzzles = recentPuzzles.current.length === 0 && puzzle ? [puzzleSignature(puzzle)] : recentPuzzles.current;
+      const next = await requestPuzzle(difficulty, {
+        theme,
+        requireEveryLetter,
+        includeProperNames: theme === "general" && includeProperNames,
+        previousPuzzles,
+        onProgress: (attempt) => setStatus(`Puzzel maken · poging ${attempt}`),
+      });
+      recentPuzzles.current = [...previousPuzzles.slice(-7), puzzleSignature(next)];
       const state = { puzzleId: next.puzzleId, mapping: { ...next.givens } };
       setPuzzle(next); setPlayerState(state); storeValue("player", { puzzle: next, state }); setStatus("");
     } catch (error) { setStatus(error instanceof Error ? error.message : "Genereren mislukt."); }

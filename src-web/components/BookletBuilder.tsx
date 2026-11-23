@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { requestPuzzle } from "../generator/client";
-import { normalizeTheme, themeLabel, type BookletSpec, type BookletThemeSpec, type Difficulty, type PuzzleDocument, type Theme } from "../types";
+import { normalizeTheme, puzzleSignature, themeLabel, type BookletSpec, type BookletThemeSpec, type Difficulty, type PuzzleDocument, type PuzzleSignature, type Theme } from "../types";
 
 const THEMES: Theme[] = ["general", "animals_familiar", "animals_all"];
 const LEVELS: Difficulty[] = [1, 2, 3, 4];
@@ -59,6 +59,7 @@ export function BookletBuilder({ initial, onSave, onPrint }: { initial: { spec: 
     if (total < 1 || total > 50) { setStatus("Kies in totaal tussen 1 en 50 puzzels."); return; }
     const controller = new AbortController(); abort.current = controller; setBusy(true); setStatus("Voorbereiden…");
     const next: PuzzleDocument[] = [];
+    let previousPuzzles: PuzzleSignature[] = [];
     try {
       for (const level of LEVELS) {
         for (const options of themeSpecs) {
@@ -69,10 +70,12 @@ export function BookletBuilder({ initial, onSave, onPrint }: { initial: { spec: 
               requireEveryLetter: options.requireEveryLetter,
               includeProperNames: options.includeProperNames,
               generationMode: "booklet",
+              previousPuzzles,
               signal: controller.signal,
               onProgress: (attempt) => setStatus(`Puzzel ${number} van ${total} · poging ${attempt}`),
             });
             next.push(puzzle);
+            previousPuzzles = [...previousPuzzles, puzzleSignature(puzzle)];
           }
         }
       }

@@ -163,27 +163,43 @@ export function assessBlockMask(mask: BlockMask, profile: LayoutProfile, availab
 }
 
 const REFLECTIONS = [[false, false], [true, false], [false, true], [true, true]] as const;
+const EDIT_ATTEMPT_LIMIT = 160;
+
+function blockPattern(mask: BlockMask): string {
+  return mask.map((row) => row.map((block) => block ? "#" : ".").join("")).join("");
+}
+
+function patternDistance(left: string, right: string): number {
+  let difference = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) difference += 1;
+  }
+  return difference;
+}
+
+function createsTwoCellRun(block: boolean, line: boolean[], index: number): boolean {
+  let before = index - 1;
+  while (before >= 0 && !line[before]) before -= 1;
+  let after = index + 1;
+  while (after < line.length && !line[after]) after += 1;
+  return block ? after - before === 3 : index - before === 3 || after - index === 3;
+}
 
 export function puzzleLayouts(
   random: SeededRandom,
   { theme, generationMode }: GenerationOptions,
   availableByLength: ReadonlyMap<number, number>,
+  previousLayouts: ReadonlySet<string> = new Set(),
 ) {
   const groups = [{ profile: LAYOUT_PROFILES[generationMode], templates: LAYOUT_TEMPLATES[generationMode][theme] }];
   if (generationMode === "booklet" && theme !== "general") {
     groups[0].profile = LAYOUT_PROFILES.animalBooklet;
     groups.push({ profile: LAYOUT_PROFILES.interactive, templates: LAYOUT_TEMPLATES.interactive[theme] });
   }
-  const maximum = groups.reduce((total, { templates }) => total + templates.length * REFLECTIONS.length * 2, 0);
+  const baseCount = groups.reduce((total, { templates }) => total + templates.length * REFLECTIONS.length, 0);
+  const maximum = previousLayouts.size ? baseCount + EDIT_ATTEMPT_LIMIT : baseCount * 2;
 
-  function* layouts(): Generator<LayoutSlot[]> {
-    const seen = new Set<string>();
-    const isNew = (mask: BlockMask) => {
-      const key = mask.map((row) => row.map(Number).join("")).join("");
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    };
+  function* starts() {
     for (const { profile, templates } of groups) {
       for (const template of random.shuffle([...templates])) {
         const rows = template.trim().split(/\s+/);
@@ -196,20 +212,91 @@ export function puzzleLayouts(
             const cells = Array.from(row, (cell) => cell === "#");
             return flipColumns ? cells.reverse() : cells;
           });
-          const base = assessBlockMask(mask, profile, availableByLength);
-          // Change a few blocks while keeping the layout constraints.
-          const variant = mask.map((row) => [...row]);
-          let assessment = base;
-          for (let edit = 0; edit < 10; edit += 1) {
-            const row = random.integer(GRID_HEIGHT), column = random.integer(GRID_WIDTH);
-            variant[row][column] = !variant[row][column];
-            const next = assessBlockMask(variant, profile, availableByLength);
-            if (next.valid) assessment = next;
-            else variant[row][column] = !variant[row][column];
-          }
-          if (assessment.valid && isNew(variant)) yield assessment.slots;
-          if (base.valid && isNew(mask)) yield base.slots;
+          yield { mask, profile, reflected: flipRows || flipColumns };
         }
+      }
+    }
+  }
+
+  function* layouts(): Generator<LayoutSlot[]> {
+    const seen = new Set(previousLayouts);
+    const unused = (mask: BlockMask, profile: LayoutProfile) => {
+      const pattern = blockPattern(mask);
+      if (seen.has(pattern)) return;
+      const assessment = assessBlockMask(mask, profile, availableByLength);
+      if (!assessment.valid) return;
+      seen.add(pattern);
+      return assessment.slots;
+    };
+
+    if (!previousLayouts.size) {
+      for (const { mask, profile } of starts()) {
+        const variant = mask.map((row) => [...row]);
+        for (let edit = 0; edit < 10; edit += 1) {
+          const row = random.integer(GRID_HEIGHT), column = random.integer(GRID_WIDTH);
+          variant[row][column] = !variant[row][column];
+          if (!assessBlockMask(variant, profile, availableByLength).valid) {
+            variant[row][column] = !variant[row][column];
+          }
+        }
+        const changed = unused(variant, profile);
+        if (changed) yield changed;
+        const base = unused(mask, profile);
+        if (base) yield base;
+      }
+      return;
+    }
+
+    const previous = [...previousLayouts];
+    const ranked = [...starts()].map((start) => {
+      const pattern = blockPattern(start.mask);
+      const distances = previous.map((used) => patternDistance(pattern, used));
+      return { ...start, pattern, distance: Math.min(...distances) };
+    }).sort((left, right) => right.distance - left.distance);
+    const preferred = theme === "general" ? ranked : ranked.filter(({ reflected }) => !reflected);
+    for (const { mask, profile } of preferred) {
+      const slots = unused(mask, profile);
+      if (slots) yield slots;
+    }
+
+    // Use the selected layouts as additional starting points for new block patterns.
+    const startingPatterns = new Set(ranked.map(({ pattern }) => pattern));
+    const accepted = previous.filter((pattern) => !startingPatterns.has(pattern)).flatMap((pattern) => {
+      const mask = Array.from({ length: GRID_HEIGHT }, (_, row) =>
+        Array.from(pattern.slice(row * GRID_WIDTH, (row + 1) * GRID_WIDTH), (cell) => cell === "#"));
+      const group = groups.find(({ profile }) => assessBlockMask(mask, profile, availableByLength).valid);
+      return group ? [{ mask, profile: group.profile, pattern }] : [];
+    });
+    const editable = [
+      ...ranked.filter(({ reflected, pattern }) => !reflected || previousLayouts.has(pattern)),
+      ...accepted,
+    ];
+    const cells = random.shuffle(Array.from({ length: GRID_WIDTH * GRID_HEIGHT }, (_, index) => index));
+    function* editedLayouts() {
+      let edits = 0;
+      for (const { mask, profile } of editable) {
+        const columns = Array.from({ length: GRID_WIDTH }, (_, column) => mask.map((row) => row[column]));
+        for (const cell of cells) {
+          const row = Math.floor(cell / GRID_WIDTH), column = cell % GRID_WIDTH;
+          const block = mask[row][column];
+          if (createsTwoCellRun(block, mask[row], column) || createsTwoCellRun(block, columns[column], row)) continue;
+          mask[row][column] = !block;
+          const slots = unused(mask, profile);
+          mask[row][column] = block;
+          if (slots) {
+            yield slots;
+            if (++edits >= EDIT_ATTEMPT_LIMIT) return;
+          }
+        }
+      }
+    }
+    yield* editedLayouts();
+
+    if (theme !== "general") {
+      for (const { mask, profile, reflected } of ranked) {
+        if (!reflected) continue;
+        const slots = unused(mask, profile);
+        if (slots) yield slots;
       }
     }
   }

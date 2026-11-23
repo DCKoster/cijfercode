@@ -1,4 +1,4 @@
-import { normalizeTheme, type Cell, type Difficulty, type Entry, type GenerationOptions, type LetterCell, type LexiconData, type PuzzleDocument, type SolverMetrics } from "../types";
+import { normalizeTheme, type Cell, type Difficulty, type Entry, type GenerationOptions, type LetterCell, type LexiconData, type PuzzleDocument, type PuzzleSignature, type SolverMetrics } from "../types";
 import { SeededRandom } from "./random";
 import { fillSlots, type FillWord } from "./fill";
 import { puzzleLayouts } from "./layout";
@@ -7,7 +7,7 @@ const WIDTH = 17 as const;
 const HEIGHT = 20 as const;
 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const MINIMUM_INDEPENDENT_LOOPS = 3;
-const GENERATOR_VERSION = "web-5";
+const GENERATOR_VERSION = "web-6";
 const DEFAULT_OPTIONS: GenerationOptions = { theme: "general", requireEveryLetter: false, includeProperNames: false, generationMode: "interactive" };
 const PROFILES: Record<Difficulty, { minimumScore: number; hints: number; maxNodes: number }> = {
   1: { minimumScore: 4, hints: 3, maxNodes: 100 },
@@ -173,7 +173,7 @@ function matchesDifficulty(difficulty: Difficulty, metrics: SolverMetrics, optio
   return metrics.searchNodes <= 5000;
 }
 
-export async function generatePuzzle(difficulty: Difficulty, seed: string, lexicon: LexiconData, onProgress?: (attempt: number, maximum: number) => void, cancelled?: () => boolean, requestedOptions: Partial<GenerationOptions> = {}): Promise<PuzzleDocument> {
+export async function generatePuzzle(difficulty: Difficulty, seed: string, lexicon: LexiconData, onProgress?: (attempt: number, maximum: number) => void, cancelled?: () => boolean, requestedOptions: Partial<GenerationOptions> = {}, previousPuzzles: readonly PuzzleSignature[] = []): Promise<PuzzleDocument> {
   const options = { ...DEFAULT_OPTIONS, ...requestedOptions, theme: normalizeTheme(requestedOptions.theme) };
   if (options.theme === "animals_familiar" && options.requireEveryLetter) {
     throw new Error("Bekende dieren kan niet met alle 26 letters worden gecombineerd, omdat deze woordenlijst geen Q bevat.");
@@ -195,14 +195,28 @@ export async function generatePuzzle(difficulty: Difficulty, seed: string, lexic
       .map(([word, score]) => ({ word, score })));
   }
   const availableByLength = new Map(Array.from(wordsByLength, ([length, words]) => [length, words.length]));
-  const { maximum, layouts } = puzzleLayouts(random, options, availableByLength);
+  const previousLayouts = new Set(previousPuzzles.map(({ layout }) => layout));
+  const previousAnswers = previousPuzzles.map(({ answers }) => new Set(answers));
+  const answerFrequency = new Map<string, number>();
+  for (const answers of previousAnswers) {
+    for (const word of answers) answerFrequency.set(word, (answerFrequency.get(word) ?? 0) + 1);
+  }
+  const diversity = previousAnswers.length ? {
+    answerFrequency,
+    acceptsAnswers: (words: string[]) => previousAnswers.every((answers) => {
+      let different = Math.min(answers.size, words.length);
+      for (const word of words) if (answers.has(word)) different -= 1;
+      return different >= 3;
+    }),
+  } : undefined;
+  const { maximum, layouts } = puzzleLayouts(random, options, availableByLength, previousLayouts);
   let attempt = 0;
   for (const slots of layouts) {
     await new Promise((resolve) => setTimeout(resolve, 0));
     if (cancelled?.()) throw new Error("Geannuleerd");
     onProgress?.(++attempt, maximum);
     if (independentCrossingLoops(slots) < MINIMUM_INDEPENDENT_LOOPS) continue;
-    const fill = await fillSlots(slots, wordsByLength, random, options, 1_500, cancelled);
+    const fill = await fillSlots(slots, wordsByLength, random, options, 1_500, cancelled, diversity);
     if (!fill) continue;
     const shuffled = random.shuffle(LETTERS.split(""));
     const codeToLetter: Record<number, string> = Object.fromEntries(shuffled.map((letter, index) => [index + 1, letter]));

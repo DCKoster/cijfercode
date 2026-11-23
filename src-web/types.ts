@@ -41,7 +41,7 @@ export interface SolverMetrics {
 
 export interface PuzzleDocument {
   schemaVersion: 4;
-  generatorVersion: "web-3" | "web-4" | "web-5";
+  generatorVersion: "web-3" | "web-4" | "web-5" | "web-6";
   lexiconVersion: string;
   puzzleId: string;
   seed: string;
@@ -94,8 +94,20 @@ export interface BookletSpec {
   includeProperNames?: boolean;
 }
 
+export interface PuzzleSignature {
+  layout: string;
+  answers: string[];
+}
+
+export function puzzleSignature(puzzle: PuzzleDocument): PuzzleSignature {
+  return {
+    layout: puzzle.grid.flat().map((code) => code === null ? "#" : ".").join(""),
+    answers: puzzle.solution.entries.map(({ word }) => word),
+  };
+}
+
 export type WorkerRequest =
-  | { type: "generate"; requestId: string; difficulty: Difficulty; options: GenerationOptions; seed: string }
+  | { type: "generate"; requestId: string; difficulty: Difficulty; options: GenerationOptions; seed: string; previousPuzzles?: readonly PuzzleSignature[] }
   | { type: "cancel"; requestId: string };
 
 export type WorkerResponse =
