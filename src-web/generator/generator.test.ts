@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import rawLexicon from "../../public/lexicon.json";
 import { normalizeTheme, type Difficulty, type Entry, type LexiconData } from "../types";
 import { candidates, generatePuzzle, independentCrossingLoops, selectGivenCodes } from "./generator";
+import { LAYOUT_PROFILES, assessBlockMask } from "./layout";
 import { SeededRandom } from "./random";
 
 const lexicon = rawLexicon as unknown as LexiconData;
@@ -114,20 +115,35 @@ describe("browser generator", () => {
     expect(puzzle.solution.entries.every((entry) => animalWords.has(entry.word))).toBe(true);
   }, 120_000);
 
-  it("retries a tree-like themed fill", async () => {
+  it.each([1, 2, 3, 4] as Difficulty[])("generates a dense, full-alphabet booklet puzzle at level %s", async (difficulty) => {
     let finalAttempt = 0;
-    const puzzle = await generatePuzzle(
-      2,
-      "connect-animals_all-2",
-      lexicon,
-      (attempt) => { finalAttempt = attempt; },
-      undefined,
-      { theme: "animals_all" },
-    );
+    const puzzle = await generatePuzzle(difficulty, `booklet-alphabet-${difficulty}`, lexicon,
+      (attempt) => { finalAttempt = attempt; }, undefined, { generationMode: "booklet", requireEveryLetter: true });
+    const mask = puzzle.grid.map((row) => row.map((cell) => cell === null));
+    const lengths = new Map(Array.from({ length: 18 }, (_, index) => [index + 3, 1_200]));
 
-    expect(finalAttempt).toBeGreaterThan(1);
+    expect(assessBlockMask(mask, LAYOUT_PROFILES.booklet, lengths).valid).toBe(true);
     expect(independentCrossingLoops(puzzle.solution.entries)).toBeGreaterThanOrEqual(3);
-  }, 120_000);
+    expect(new Set(puzzle.grid.flat().filter((code) => code !== null)).size).toBe(26);
+    expect(puzzle.measured.solutions).toBe(1);
+    expect(puzzle.measured.exhausted).toBe(false);
+    expect(finalAttempt).toBeLessThanOrEqual(3);
+  });
+
+  it.each(["animals_familiar", "animals_all"] as const)("makes a booklet puzzle for the %s theme", async (theme) => {
+    const requireEveryLetter = theme === "animals_all";
+    const source = requireEveryLetter ? lexicon.themes.animals.words : lexicon.themes.animals.familiarWords;
+    const words = new Set(Object.values(source).flatMap((entries) => entries.map(([word]) => word)));
+    const puzzle = await generatePuzzle(4, `booklet-${theme}`, lexicon, undefined, undefined,
+      { theme, generationMode: "booklet", requireEveryLetter });
+    const mask = puzzle.grid.map((row) => row.map((cell) => cell === null));
+    const lengths = new Map(Object.entries(source).map(([length, entries]) => [Number(length), entries.length]));
+
+    expect(assessBlockMask(mask, LAYOUT_PROFILES.animalBooklet, lengths).valid).toBe(true);
+    expect(puzzle.solution.entries.every(({ word }) => words.has(word))).toBe(true);
+    expect(puzzle.measured.solutions).toBe(1);
+    if (requireEveryLetter) expect(new Set(puzzle.grid.flat().filter((code) => code !== null)).size).toBe(26);
+  });
 
   it.each(["general", "animals_all"] as const)("can require every letter for %s puzzles", async (theme) => {
     const puzzle = await generatePuzzle(2, `alfabet-${theme}`, lexicon, undefined, undefined, { theme, requireEveryLetter: true });

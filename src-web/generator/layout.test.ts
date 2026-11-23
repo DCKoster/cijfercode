@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { blockClusterSizes, connectedOpenCells, countOpenAreasLargerThanTwoByTwo, countOpenThreeByThreeAreas, countTwoCellRuns, extractSlots, lengthDistribution, scoreBlockMask, GRID_HEIGHT, GRID_WIDTH, LAYOUT_PROFILES } from "./layout";
+import { blockClusterSizes, connectedOpenCells, countOpenAreasLargerThanTwoByTwo, countOpenThreeByThreeAreas, countTwoCellRuns, extractSlots, lengthDistribution, assessBlockMask, GRID_HEIGHT, GRID_WIDTH, LAYOUT_PROFILES } from "./layout";
 
 describe("dense block layouts", () => {
   it("extracts horizontal and vertical slots and measures their lengths", () => {
@@ -16,7 +16,7 @@ describe("dense block layouts", () => {
   it("rejects disconnected and unsupported masks", () => {
     const mask = Array.from({ length: GRID_HEIGHT }, () => Array(GRID_WIDTH).fill(true) as boolean[]);
     for (let column = 0; column < 3; column += 1) { mask[0][column] = false; mask[19][column] = false; }
-    const assessment = scoreBlockMask(mask, LAYOUT_PROFILES.interactive, new Map([[3, 1]]));
+    const assessment = assessBlockMask(mask, LAYOUT_PROFILES.interactive, new Map([[3, 1]]));
     expect(assessment.valid).toBe(false);
   });
 
@@ -34,7 +34,7 @@ describe("dense block layouts", () => {
     mask[0][0] = mask[0][1] = mask[1][1] = true;
     for (let column = 5; column < 10; column += 1) mask[4][column] = true;
     expect(blockClusterSizes(mask).sort((a, b) => a - b)).toEqual([3, 5]);
-    expect(scoreBlockMask(mask, LAYOUT_PROFILES.interactive, new Map()).valid).toBe(false);
+    expect(assessBlockMask(mask, LAYOUT_PROFILES.interactive, new Map()).valid).toBe(false);
   });
 
   it("detects solid letter areas larger than two by two", () => {

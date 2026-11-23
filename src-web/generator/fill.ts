@@ -1,33 +1,89 @@
 import type { Entry, GenerationOptions, LetterCell } from "../types";
 import { SeededRandom } from "./random";
-import type { LayoutSlot } from "./layout";
+import { GRID_HEIGHT, GRID_WIDTH, type LayoutSlot } from "./layout";
 
 export interface FillWord { word: string; score: number }
-export interface FillResult { grid: LetterCell[][]; entries: Entry[]; nodes: number; exhausted: boolean }
+export interface FillResult { grid: LetterCell[][]; entries: Entry[]; nodes: number }
 
-export function hasArcConsistentDomains(slots: LayoutSlot[], wordsByLength: ReadonlyMap<number, FillWord[]>): boolean {
-  const domains = slots.map((slot) => [...(wordsByLength.get(slot.length) ?? [])]);
-  const cells = new Map<string, Array<[number, number]>>();
-  for (const [slotIndex, slot] of slots.entries()) for (const [position, [row, column]] of slot.positions.entries()) {
-    const key = `${row},${column}`, values = cells.get(key) ?? [];
-    values.push([slotIndex, position]); cells.set(key, values);
+const ALPHABET = (1 << 26) - 1;
+type Candidate = FillWord & { letters: number[]; mask: number };
+type Domains = Candidate[][];
+interface Crossing { position: number; other: number; otherPosition: number }
+
+function createDomains(slots: LayoutSlot[], wordsByLength: ReadonlyMap<number, FillWord[]>, random?: SeededRandom): Domains {
+  const byLength = new Map<number, Candidate[]>();
+  return slots.map((slot) => {
+    let domain = byLength.get(slot.length);
+    if (!domain) {
+      const words = wordsByLength.get(slot.length) ?? [];
+      const ordered = random ? random.shuffle([...words]) : words;
+      domain = ordered.map(({ word, score }) => {
+        const letters = Array.from(word, (letter) => letter.charCodeAt(0) - 65);
+        return { word, score, letters, mask: letters.reduce((mask, letter) => mask | (1 << letter), 0) };
+      });
+      byLength.set(slot.length, domain);
+    }
+    return domain;
+  });
+}
+
+function slotCrossings(slots: LayoutSlot[]): Crossing[][] {
+  const crossings = slots.map(() => [] as Crossing[]);
+  const cells = new Map<number, { slot: number; position: number }>();
+  for (const [slot, entry] of slots.entries()) {
+    for (const [position, [row, column]] of entry.positions.entries()) {
+      const cell = row * GRID_WIDTH + column;
+      const first = cells.get(cell);
+      if (first) {
+        crossings[slot].push({ position, other: first.slot, otherPosition: first.position });
+        crossings[first.slot].push({ position: first.position, other: slot, otherPosition: position });
+      } else {
+        cells.set(cell, { slot, position });
+      }
+    }
   }
-  const arcs: Array<[number, number, number, number]> = [];
-  for (const values of cells.values()) if (values.length === 2) {
-    const [[left, leftPosition], [right, rightPosition]] = values;
-    arcs.push([left, right, leftPosition, rightPosition], [right, left, rightPosition, leftPosition]);
-  }
-  let reduced = true;
-  while (reduced) {
-    reduced = false;
-    for (const [from, to, fromPosition, toPosition] of arcs) {
-      const supported = new Set(domains[to].map(({ word }) => word[toPosition]));
-      const next = domains[from].filter(({ word }) => supported.has(word[fromPosition]));
-      if (!next.length) return false;
-      if (next.length !== domains[from].length) { domains[from] = next; reduced = true; }
+  return crossings;
+}
+
+function propagate(domains: Domains, crossings: Crossing[][], slotsByLength: number[][], changed: number[]): boolean {
+  const queued = new Uint8Array(domains.length);
+  for (const slot of changed) queued[slot] = 1;
+  const queue = [...changed];
+  const update = (slot: number, domain: Candidate[]) => {
+    if (!domain.length) return false;
+    if (domain.length === domains[slot].length) return true;
+    domains[slot] = domain;
+    if (!queued[slot]) {
+      queue.push(slot);
+      queued[slot] = 1;
+    }
+    return true;
+  };
+  for (let index = 0; index < queue.length; index += 1) {
+    const slot = queue[index];
+    queued[slot] = 0;
+    const domain = domains[slot];
+    if (!domain.length) return false;
+    if (domain.length === 1) {
+      const word = domain[0].word;
+      for (const other of slotsByLength[domain[0].letters.length]) {
+        if (other !== slot && !update(other, domains[other].filter((candidate) => candidate.word !== word))) return false;
+      }
+    }
+    for (const { position, other, otherPosition } of crossings[slot]) {
+      let supported = 0;
+      for (const candidate of domain) supported |= 1 << candidate.letters[position];
+      if (supported === ALPHABET) continue;
+      if (!update(other, domains[other].filter((candidate) => supported & (1 << candidate.letters[otherPosition])))) return false;
     }
   }
   return true;
+}
+
+function groupSlotsByLength(slots: LayoutSlot[]): number[][] {
+  const groups: number[][] = Array.from({ length: Math.max(GRID_WIDTH, GRID_HEIGHT) + 1 }, () => []);
+  for (const [index, slot] of slots.entries()) groups[slot.length].push(index);
+  return groups;
 }
 
 export async function fillSlots(
@@ -38,108 +94,110 @@ export async function fillSlots(
   nodeBudget: number,
   cancelled?: () => boolean,
 ): Promise<FillResult | null> {
-  const grid: LetterCell[][] = Array.from({ length: 20 }, () => Array(17).fill(null));
-  const assigned = Array<string | null>(slots.length).fill(null);
-  const used = new Set<string>();
-  const usedLetters = new Set<string>();
-  const domains = slots.map((slot) => {
-    const variation = new Map((wordsByLength.get(slot.length) ?? []).map(({ word }) => [word, random.next()]));
-    return [...(wordsByLength.get(slot.length) ?? [])].sort((a, b) => b.score - a.score || variation.get(a.word)! - variation.get(b.word)!);
-  });
-  const activeDomains = domains.map((domain) => [...domain]);
-  const cellSlots = new Map<string, number[]>();
-  for (const [slotIndex, slot] of slots.entries()) for (const [row, column] of slot.positions) {
-    const key = `${row},${column}`, values = cellSlots.get(key) ?? [];
-    values.push(slotIndex); cellSlots.set(key, values);
-  }
-  const arcs: Array<[number, number, number, number]> = [];
-  for (const values of cellSlots.values()) if (values.length === 2) {
-    const [left, right] = values;
-    const leftPosition = slots[left].positions.findIndex(([row, column]) => slots[right].positions.some(([otherRow, otherColumn]) => row === otherRow && column === otherColumn));
-    const [crossRow, crossColumn] = slots[left].positions[leftPosition];
-    const rightPosition = slots[right].positions.findIndex(([row, column]) => row === crossRow && column === crossColumn);
-    arcs.push([left, right, leftPosition, rightPosition], [right, left, rightPosition, leftPosition]);
-  }
-  let reduced = true;
-  while (reduced) {
-    reduced = false;
-    for (const [from, to, fromPosition, toPosition] of arcs) {
-      const supported = new Set(activeDomains[to].map(({ word }) => word[toPosition]));
-      const next = activeDomains[from].filter(({ word }) => supported.has(word[fromPosition]));
-      if (!next.length) return null;
-      if (next.length !== activeDomains[from].length) { activeDomains[from] = next; reduced = true; }
+  const domains = createDomains(slots, wordsByLength, random);
+  const crossings = slotCrossings(slots);
+  const slotsByLength = groupSlotsByLength(slots);
+  let nodes = 0;
+  const letterCounts = new WeakMap<Candidate[], Uint16Array>();
+  const countLetters = (domain: Candidate[]): Uint16Array => {
+    const cached = letterCounts.get(domain);
+    if (cached) return cached;
+    const counts = new Uint16Array(26);
+    for (const candidate of domain) {
+      for (let mask = candidate.mask; mask; mask &= mask - 1) {
+        counts[31 - Math.clz32(mask & -mask)] += 1;
+      }
     }
-  }
-  let nodes = 0, exhausted = false;
+    letterCounts.set(domain, counts);
+    return counts;
+  };
 
-  const search = async (depth: number): Promise<boolean> => {
-    if (cancelled?.()) throw new Error("Geannuleerd");
-    if (depth === slots.length) return !options.requireEveryLetter || usedLetters.size === 26;
-    let choice = -1, possible: FillWord[] = [];
-    const requiredLetter = options.requireEveryLetter ? [..."QXCYFJZWVKBPHDGMOULNTRSAEI"].find((letter) => !usedLetters.has(letter)) : undefined;
-    let requiredChoice = -1, requiredWords: FillWord[] = [];
-    for (let index = 0; index < slots.length; index += 1) {
-      if (assigned[index] !== null) continue;
-      const candidates = activeDomains[index].filter(({ word }) => !used.has(word));
-      if (!candidates.length) return false;
-      if (choice < 0 || candidates.length < possible.length) { choice = index; possible = candidates; }
-      if (requiredLetter) {
-        const covering = candidates.filter(({ word }) => word.includes(requiredLetter));
-        if (covering.length && (requiredChoice < 0 || covering.length < requiredWords.length)) { requiredChoice = index; requiredWords = covering; }
+  const search = async (current: Domains): Promise<Domains | null> => {
+    let choice = -1;
+    let present = 0;
+    const unfilled: number[] = [];
+    for (const [slot, domain] of current.entries()) {
+      if (domain.length === 1) {
+        present |= domain[0].mask;
+      } else {
+        unfilled.push(slot);
+        const best = current[choice];
+        if (!best || domain.length < best.length
+          || (domain.length === best.length && crossings[slot].length > crossings[choice].length)) {
+          choice = slot;
+        }
       }
     }
-    if (requiredLetter) {
-      if (requiredChoice < 0) return false;
-      choice = requiredChoice; possible = requiredWords;
+    const missing = options.requireEveryLetter ? ALPHABET & ~present : 0;
+    if (choice < 0) return missing ? null : current;
+
+    let required = 0;
+    if (missing) {
+      const counts = new Uint32Array(26);
+      for (const slot of unfilled) {
+        const supported = countLetters(current[slot]);
+        for (let mask = missing; mask; mask &= mask - 1) {
+          const letter = 31 - Math.clz32(mask & -mask);
+          counts[letter] += supported[letter];
+        }
+      }
+      // The rarest missing letter may have viable placements in several slots.
+      let fewest = Math.max(16, current[choice].length);
+      for (let mask = missing; mask; mask &= mask - 1) {
+        const bit = mask & -mask;
+        const count = counts[31 - Math.clz32(bit)];
+        if (!count) return null;
+        if (count <= fewest) {
+          required = bit;
+          fewest = count;
+        }
+      }
     }
-    if (options.requireEveryLetter && usedLetters.size < 26) {
-      possible.sort((a, b) => {
-        const coverage = (word: string) => new Set([...word].filter((letter) => !usedLetters.has(letter))).size;
-        return coverage(b.word) - coverage(a.word) || b.score - a.score;
+
+    const choices = required ? unfilled : [choice];
+    const placements = choices.flatMap((slot) => {
+      const words = required ? current[slot].filter((candidate) => candidate.mask & required) : current[slot];
+      if (!words.length) return [];
+      const support = crossings[slot].map(({ other, otherPosition }) => {
+        const counts = new Uint16Array(26);
+        for (const candidate of current[other]) counts[candidate.letters[otherPosition]] += 1;
+        return counts;
       });
-    }
-    const support = new Map<string, number>();
-    for (const [position, [row, column]] of slots[choice].positions.entries()) {
-      const other = (cellSlots.get(`${row},${column}`) ?? []).find((slotIndex) => slotIndex !== choice && assigned[slotIndex] === null);
-      if (other === undefined) continue;
-      const otherPosition = slots[other].positions.findIndex(([otherRow, otherColumn]) => otherRow === row && otherColumn === column);
-      const counts = new Map<string, number>();
-      for (const candidate of activeDomains[other]) if (!used.has(candidate.word)) counts.set(candidate.word[otherPosition], (counts.get(candidate.word[otherPosition]) ?? 0) + 1);
-      for (const candidate of possible) support.set(candidate.word, (support.get(candidate.word) ?? 0) + Math.log1p(counts.get(candidate.word[position]) ?? 0));
-    }
-    const rareWeight: Record<string, number> = { Q: 100, X: 40, Y: 15, C: 8, F: 6, J: 6 };
-    const coverage = (word: string) => options.requireEveryLetter ? [...new Set([...word].filter((letter) => !usedLetters.has(letter)))].reduce((sum, letter) => sum + (rareWeight[letter] ?? 1), 0) : 0;
-    possible.sort((a, b) => coverage(b.word) - coverage(a.word) || (support.get(b.word) ?? 0) - (support.get(a.word) ?? 0) || b.score - a.score);
-    for (const { word } of possible) {
+      return words.map((candidate) => {
+        let priority = candidate.score + random.next();
+        for (let mask = candidate.mask & missing; mask; mask &= mask - 1) priority += 2;
+        for (const [index, { position }] of crossings[slot].entries()) {
+          priority += Math.log(support[index][candidate.letters[position]] / current[crossings[slot][index].other].length);
+        }
+        return { slot, candidate, priority };
+      });
+    }).sort((a, b) => b.priority - a.priority);
+
+    for (const { slot, candidate } of placements) {
+      if (nodes >= nodeBudget) return null;
       nodes += 1;
-      if (nodes > nodeBudget) { exhausted = true; return false; }
-      if ((nodes & 2047) === 0) { await new Promise<void>((resolve) => setTimeout(resolve, 0)); if (cancelled?.()) throw new Error("Geannuleerd"); }
-      const changed: Array<[number, number]> = [];
-      for (const [position, [row, column]] of slots[choice].positions.entries()) if (grid[row][column] === null) { grid[row][column] = word[position]; changed.push([row, column]); }
-      assigned[choice] = word; used.add(word);
-      const previousLetters = new Set(usedLetters); for (const letter of word) usedLetters.add(letter);
-      const previousDomains = new Map<number, FillWord[]>();
-      let viable = true;
-      const affected = new Set<number>();
-      for (const [row, column] of changed) for (const slotIndex of cellSlots.get(`${row},${column}`) ?? []) if (assigned[slotIndex] === null) affected.add(slotIndex);
-      for (const slotIndex of affected) {
-        previousDomains.set(slotIndex, activeDomains[slotIndex]);
-        activeDomains[slotIndex] = activeDomains[slotIndex].filter(({ word: candidate }) => slots[slotIndex].positions.every(([row, column], position) => grid[row][column] === null || grid[row][column] === candidate[position]));
-        if (!activeDomains[slotIndex].length) { viable = false; break; }
+      if ((nodes & 255) === 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        if (cancelled?.()) throw new Error("Geannuleerd");
       }
-      if (viable && await search(depth + 1)) return true;
-      assigned[choice] = null; used.delete(word); changed.forEach(([row, column]) => { grid[row][column] = null; });
-      previousDomains.forEach((domain, index) => { activeDomains[index] = domain; });
-      usedLetters.clear(); previousLetters.forEach((letter) => usedLetters.add(letter));
-      if (exhausted) return false;
+      const next = [...current];
+      next[slot] = [candidate];
+      if (!propagate(next, crossings, slotsByLength, [slot])) continue;
+      const filled = await search(next);
+      if (filled) return filled;
     }
-    return false;
+    return null;
   };
-  if (!await search(0)) return null;
-  return {
-    grid,
-    entries: slots.map((slot, index) => ({ row: slot.row, column: slot.column, direction: slot.direction, length: slot.length, word: assigned[index]! })),
-    nodes,
-    exhausted,
-  };
+
+  if (cancelled?.()) throw new Error("Geannuleerd");
+  if (nodeBudget < 1 || !propagate(domains, crossings, slotsByLength, slots.map((_, index) => index))) return null;
+  const filled = await search(domains);
+  if (!filled) return null;
+  const grid: LetterCell[][] = Array.from({ length: GRID_HEIGHT }, () => Array(GRID_WIDTH).fill(null));
+  const entries: Entry[] = slots.map(({ positions, ...slot }, index) => {
+    const { word } = filled[index][0];
+    for (const [position, [row, column]] of positions.entries()) grid[row][column] = word[position];
+    return { ...slot, word };
+  });
+  return { grid, entries, nodes };
 }

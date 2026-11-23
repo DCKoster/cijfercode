@@ -41,7 +41,7 @@ export interface SolverMetrics {
 
 export interface PuzzleDocument {
   schemaVersion: 4;
-  generatorVersion: "web-3" | "web-4";
+  generatorVersion: "web-3" | "web-4" | "web-5";
   lexiconVersion: string;
   puzzleId: string;
   seed: string;

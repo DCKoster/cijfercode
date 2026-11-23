@@ -1,13 +1,13 @@
 import { normalizeTheme, type Cell, type Difficulty, type Entry, type GenerationOptions, type LetterCell, type LexiconData, type PuzzleDocument, type SolverMetrics } from "../types";
 import { SeededRandom } from "./random";
-import { fillSlots, hasArcConsistentDomains, type FillWord } from "./fill";
-import { generateBlockMask, LAYOUT_PROFILES, type MaskScore } from "./layout";
+import { fillSlots, type FillWord } from "./fill";
+import { puzzleLayouts } from "./layout";
 
 const WIDTH = 17 as const;
 const HEIGHT = 20 as const;
 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const MINIMUM_INDEPENDENT_LOOPS = 3;
-const BOOKLET_CANDIDATE_LIMIT = 2;
+const GENERATOR_VERSION = "web-5";
 const DEFAULT_OPTIONS: GenerationOptions = { theme: "general", requireEveryLetter: false, includeProperNames: false, generationMode: "interactive" };
 const PROFILES: Record<Difficulty, { minimumScore: number; hints: number; maxNodes: number }> = {
   1: { minimumScore: 4, hints: 3, maxNodes: 100 },
@@ -93,19 +93,30 @@ function extractEntries(grid: Cell[][]): Array<{ positions: Array<[number, numbe
 }
 
 function compatible(codes: number[], word: string, mapping: Map<number, string>, reverse: Map<string, number>): boolean {
-  const proposedCodes = new Map<number, string>(), proposedLetters = new Map<string, number>();
-  for (let index = 0; index < codes.length; index += 1) {
-    const code = codes[index], letter = word[index];
+  for (const [index, code] of codes.entries()) {
+    const letter = word[index];
     if ((mapping.has(code) && mapping.get(code) !== letter) || (reverse.has(letter) && reverse.get(letter) !== code)) return false;
-    if ((proposedCodes.has(code) && proposedCodes.get(code) !== letter) || (proposedLetters.has(letter) && proposedLetters.get(letter) !== code)) return false;
-    proposedCodes.set(code, letter); proposedLetters.set(letter, code);
   }
   return true;
 }
 
-function solve(grid: Cell[][], givens: Record<number, string>, lexicon: LexiconData, minimumScore: number, maxNodes: number, options: GenerationOptions): SolveResult {
+function solve(grid: Cell[][], givens: Record<number, string>, wordsByLength: ReadonlyMap<number, string[]>, maxNodes: number): SolveResult {
   const entries = extractEntries(grid);
-  const domains = entries.map(({ codes }) => candidates(lexicon, codes.length, minimumScore, options).filter((word) => pattern(word.split("")).join() === pattern(codes).join()));
+  const patternsByLength = new Map<number, Map<string, string[]>>();
+  const domains = entries.map(({ codes }) => {
+    let byPattern = patternsByLength.get(codes.length);
+    if (!byPattern) {
+      byPattern = new Map();
+      for (const word of wordsByLength.get(codes.length) ?? []) {
+        const key = pattern(word.split("")).join();
+        const words = byPattern.get(key) ?? [];
+        words.push(word);
+        byPattern.set(key, words);
+      }
+      patternsByLength.set(codes.length, byPattern);
+    }
+    return byPattern.get(pattern(codes).join()) ?? [];
+  });
   const solutions: LetterCell[][][] = [];
   const metrics: SolverMetrics = { solutions: 0, propagationSteps: 0, searchNodes: 0, maxDepth: 0, exhausted: false };
   const initial = new Map<number, string>(Object.entries(givens).map(([code, letter]) => [Number(code), letter]));
@@ -168,28 +179,31 @@ export async function generatePuzzle(difficulty: Difficulty, seed: string, lexic
     throw new Error("Bekende dieren kan niet met alle 26 letters worden gecombineerd, omdat deze woordenlijst geen Q bevat.");
   }
   const profile = PROFILES[difficulty];
-  const maximum = options.generationMode === "booklet" ? 96 : 24;
-  const fillBudget = options.generationMode === "booklet" ? 500_000 : 100_000;
-  const layoutProfile = LAYOUT_PROFILES[options.generationMode];
   const optionKey = `${options.theme}:${Number(options.requireEveryLetter)}:${Number(options.includeProperNames)}:${options.generationMode}`;
-  const random = new SeededRandom(`cijfercode-web-4:${seed}:${difficulty}:${optionKey}`);
+  const random = new SeededRandom(`cijfercode-${GENERATOR_VERSION}:${seed}:${difficulty}:${optionKey}`);
   const source = wordSource(lexicon, options);
   const wordsByLength = new Map<number, FillWord[]>();
+  const solverWords = new Map<number, string[]>();
   for (let length = 3; length <= 20; length += 1) {
-    const allowed = new Set(candidates(lexicon, length, profile.minimumScore, options));
+    const allowed = candidates(lexicon, length, profile.minimumScore, options);
+    solverWords.set(length, allowed);
+    const available = new Set(allowed);
     const limit = options.theme === "general" ? 1_200 : Number.POSITIVE_INFINITY;
-    wordsByLength.set(length, (source[String(length)] ?? []).filter(([word]) => allowed.has(word)).slice(0, limit).map(([word, score]) => ({ word, score })));
+    wordsByLength.set(length, (source[String(length)] ?? [])
+      .filter(([word]) => available.has(word))
+      .filter(([word], index) => index < limit || (options.requireEveryLetter && /[QXY]/.test(word)))
+      .map(([word, score]) => ({ word, score })));
   }
   const availableByLength = new Map(Array.from(wordsByLength, ([length, words]) => [length, words.length]));
-  const valid: Array<{ puzzle: PuzzleDocument; assessment: MaskScore; familiarity: number }> = [];
-  for (let attempt = 1; attempt <= maximum; attempt += 1) {
+  const { maximum, layouts } = puzzleLayouts(random, options, availableByLength);
+  let attempt = 0;
+  for (const slots of layouts) {
     await new Promise((resolve) => setTimeout(resolve, 0));
     if (cancelled?.()) throw new Error("Geannuleerd");
-    onProgress?.(attempt, maximum);
-    const layout = generateBlockMask(random, layoutProfile, availableByLength, 18_000, (slots) => hasArcConsistentDomains(slots, wordsByLength));
-    if (!layout) continue;
-    const fill = await fillSlots(layout.assessment.slots, wordsByLength, random, options, fillBudget, cancelled);
-    if (!fill || independentCrossingLoops(fill.entries) < MINIMUM_INDEPENDENT_LOOPS) continue;
+    onProgress?.(++attempt, maximum);
+    if (independentCrossingLoops(slots) < MINIMUM_INDEPENDENT_LOOPS) continue;
+    const fill = await fillSlots(slots, wordsByLength, random, options, 1_500, cancelled);
+    if (!fill) continue;
     const shuffled = random.shuffle(LETTERS.split(""));
     const codeToLetter: Record<number, string> = Object.fromEntries(shuffled.map((letter, index) => [index + 1, letter]));
     const letterToCode = Object.fromEntries(Object.entries(codeToLetter).map(([code, letter]) => [letter, Number(code)]));
@@ -199,31 +213,15 @@ export async function generatePuzzle(difficulty: Difficulty, seed: string, lexic
     const givenCodes = selectGivenCodes(frequencies, codeToLetter, profile.hints, random);
     if (givenCodes.length < profile.hints) continue;
     const givens = Object.fromEntries(givenCodes.map((code) => [code, codeToLetter[code]]));
-    const solved = solve(grid, givens, lexicon, profile.minimumScore, options.theme !== "general" ? 5000 : profile.maxNodes, options);
+    const solved = solve(grid, givens, solverWords, options.theme !== "general" ? 5000 : profile.maxNodes);
     if (!matchesDifficulty(difficulty, solved.metrics, options)) continue;
-    const puzzle: PuzzleDocument = {
-      schemaVersion: 4, generatorVersion: "web-4", lexiconVersion: lexicon.version,
+    return {
+      schemaVersion: 4, generatorVersion: GENERATOR_VERSION, lexiconVersion: lexicon.version,
       puzzleId: hashId(`${seed}:${difficulty}:${optionKey}:${JSON.stringify(grid)}:${JSON.stringify(givens)}`), seed, difficulty,
       theme: options.theme, requireEveryLetter: options.requireEveryLetter, includeProperNames: options.includeProperNames,
       width: WIDTH, height: HEIGHT, grid, givens, measured: solved.metrics,
       solution: { grid: fill.grid, codeToLetter, entries: fill.entries },
     };
-    const scoreLookup = new Map(Object.values(source).flat().map(([word, score]) => [word, score]));
-    const familiarity = fill.entries.reduce((sum, entry) => sum + (scoreLookup.get(entry.word) ?? 0), 0) / fill.entries.length;
-    if (options.generationMode === "interactive") return puzzle;
-    valid.push({ puzzle, assessment: layout.assessment, familiarity });
-    if (valid.length >= BOOKLET_CANDIDATE_LIMIT) break;
-  }
-  if (valid.length) {
-    valid.sort((a, b) => {
-      const quality = (candidate: typeof a) => Math.abs(candidate.assessment.blocks - 108) * 2
-        + Math.abs(candidate.assessment.slots.length - 55) * 4
-        + Math.abs(candidate.assessment.distribution.short - candidate.assessment.slots.length * 0.5) * 5
-        + Math.abs(candidate.assessment.distribution.medium - candidate.assessment.slots.length * 0.4) * 4
-        + Math.abs(candidate.assessment.distribution.long - candidate.assessment.slots.length * 0.1) * 3;
-      return quality(a) - quality(b) || b.familiarity - a.familiarity;
-    });
-    return valid[0].puzzle;
   }
   const guarantee = options.requireEveryLetter ? " met alle 26 letters" : "";
   const subject = options.theme !== "general" ? "dierenpuzzel" : "puzzel";

@@ -1,4 +1,5 @@
-import type { Entry } from "../types";
+import type { Entry, GenerationOptions } from "../types";
+import { LAYOUT_TEMPLATES } from "./layoutTemplates";
 import { SeededRandom } from "./random";
 
 export const GRID_WIDTH = 17;
@@ -8,14 +9,13 @@ export type BlockMask = boolean[][]; // true is a block
 export interface LayoutProfile {
   blocks: readonly [number, number];
   words: readonly [number, number];
-  targetBlocks: number;
-  targetWords: number;
 }
 
-export const LAYOUT_PROFILES: Record<"interactive" | "booklet", LayoutProfile> = {
-  interactive: { blocks: [119, 136], words: [45, 55], targetBlocks: 127, targetWords: 50 },
-  booklet: { blocks: [100, 115], words: [50, 58], targetBlocks: 108, targetWords: 55 },
-};
+export const LAYOUT_PROFILES = {
+  interactive: { blocks: [119, 136], words: [45, 55] },
+  booklet: { blocks: [100, 115], words: [50, 58] },
+  animalBooklet: { blocks: [100, 132], words: [47, 58] },
+} satisfies Record<string, LayoutProfile>;
 
 export interface LayoutSlot extends Omit<Entry, "word"> { positions: Array<[number, number]> }
 
@@ -138,143 +138,81 @@ export function lengthDistribution(slots: Array<Pick<LayoutSlot, "length">>): { 
   return result;
 }
 
-export interface MaskScore {
-  score: number;
-  blocks: number;
-  slots: LayoutSlot[];
-  distribution: { short: number; medium: number; long: number };
-  valid: boolean;
-}
-
-export function scoreBlockMask(mask: BlockMask, profile: LayoutProfile, availableByLength: ReadonlyMap<number, number>): MaskScore {
+export function assessBlockMask(mask: BlockMask, profile: LayoutProfile, availableByLength: ReadonlyMap<number, number>) {
   const blocks = mask.flat().filter(Boolean).length;
   const slots = extractSlots(mask);
-  const covered = new Set(slots.flatMap((slot) => slot.positions.map(([row, column]) => `${row},${column}`)));
-  const open = GRID_WIDTH * GRID_HEIGHT - blocks;
-  const connected = connectedOpenCells(mask);
-  const twoCellRuns = countTwoCellRuns(mask);
-  const blockClusters = blockClusterSizes(mask);
-  const oversizedBlockCells = blockClusters.reduce((sum, size) => sum + Math.max(0, size - 3), 0);
-  const openThreeByThreeAreas = countOpenThreeByThreeAreas(mask);
-  const oversizedOpenAreas = countOpenAreasLargerThanTwoByTwo(mask);
-  let unusable = 0;
-  for (let row = 0; row < GRID_HEIGHT; row += 1) for (let column = 0; column < GRID_WIDTH; column += 1) if (!mask[row][column] && !covered.has(`${row},${column}`)) unusable += 1;
-  const required = new Map<number, number>();
-  for (const slot of slots) required.set(slot.length, (required.get(slot.length) ?? 0) + 1);
-  let unavailable = 0;
-  let scarcity = 0;
-  for (const [length, count] of required) unavailable += Math.max(0, count - (availableByLength.get(length) ?? 0));
-  for (const slot of slots) scarcity += 1 / Math.max(1, availableByLength.get(slot.length) ?? 0);
   const distribution = lengthDistribution(slots);
-  const usage = new Map<string, number>();
-  for (const slot of slots) for (const [row, column] of slot.positions) usage.set(`${row},${column}`, (usage.get(`${row},${column}`) ?? 0) + 1);
-  let constrainedCrossings = 0;
+  const open = GRID_WIDTH * GRID_HEIGHT - blocks;
+  const covered = new Set<number>();
+  const required = new Map<number, number>();
   for (const slot of slots) {
-    const crossings = slot.positions.filter(([row, column]) => (usage.get(`${row},${column}`) ?? 0) > 1).length;
-    constrainedCrossings += Math.max(0, crossings - (slot.length <= 5 ? 1 : slot.length <= 9 ? 3 : 6)) * (slot.length <= 5 ? 18 : 5);
+    required.set(slot.length, (required.get(slot.length) ?? 0) + 1);
+    for (const [row, column] of slot.positions) covered.add(row * GRID_WIDTH + column);
   }
-  const targetShort = slots.length * 0.5, targetMedium = slots.length * 0.4, targetLong = slots.length * 0.1;
-  const outside = (value: number, [minimum, maximum]: readonly [number, number]) => value < minimum ? minimum - value : value > maximum ? value - maximum : 0;
-  const score = outside(blocks, profile.blocks) * 60 + Math.abs(blocks - profile.targetBlocks) * 2
-    + outside(slots.length, profile.words) * 100 + Math.abs(slots.length - profile.targetWords) * 4
-    + Math.abs(distribution.short - targetShort) * 5 + Math.abs(distribution.medium - targetMedium) * 4 + Math.abs(distribution.long - targetLong) * 3
-    + unusable * 500 + twoCellRuns * 750 + oversizedBlockCells * 1_000 + openThreeByThreeAreas * 750 + oversizedOpenAreas * 750
-    + (open - connected) * 500 + unavailable * 1000 + constrainedCrossings + scarcity * 400;
-  const ratios = slots.length ? [distribution.short / slots.length, distribution.medium / slots.length, distribution.long / slots.length] : [0, 0, 0];
+  const [short, medium, long] = [distribution.short, distribution.medium, distribution.long].map((count) => count / slots.length);
   const valid = blocks >= profile.blocks[0] && blocks <= profile.blocks[1]
     && slots.length >= profile.words[0] && slots.length <= profile.words[1]
-    && unusable === 0 && twoCellRuns === 0 && oversizedBlockCells === 0 && openThreeByThreeAreas === 0 && oversizedOpenAreas === 0
-    && connected === open && unavailable === 0
-    && ratios[0] >= 0.35 && ratios[0] <= 0.65 && ratios[1] >= 0.25 && ratios[1] <= 0.55 && ratios[2] >= 0.03 && ratios[2] <= 0.22;
-  return { score, blocks, slots, distribution, valid };
+    && short >= 0.35 && short <= 0.65 && medium >= 0.25 && medium <= 0.55 && long >= 0.03 && long <= 0.22
+    && covered.size === open
+    && Array.from(required).every(([length, count]) => count <= (availableByLength.get(length) ?? 0))
+    && countTwoCellRuns(mask) === 0
+    && countOpenAreasLargerThanTwoByTwo(mask) === 0
+    && blockClusterSizes(mask).every((size) => size <= 3)
+    && connectedOpenCells(mask) === open;
+  return { blocks, slots, distribution, valid };
 }
 
-export function initialBlockMask(random: SeededRandom, target: number): BlockMask {
-  const mask = Array.from({ length: GRID_HEIGHT }, () => Array(GRID_WIDTH).fill(false) as boolean[]);
-  let blocks = 0;
-  let attempts = 0;
-  while (blocks < target && attempts < 50_000) {
-    attempts += 1;
-    let row = random.integer(GRID_HEIGHT), column = random.integer(GRID_WIDTH);
-    if (random.next() < 0.45 && blocks > 0) {
-      const existing: Array<[number, number]> = [];
-      for (let candidateRow = 0; candidateRow < GRID_HEIGHT; candidateRow += 1) for (let candidateColumn = 0; candidateColumn < GRID_WIDTH; candidateColumn += 1) if (mask[candidateRow][candidateColumn]) existing.push([candidateRow, candidateColumn]);
-      const [blockRow, blockColumn] = existing[random.integer(existing.length)];
-      const [dr, dc] = [[-1, 0], [1, 0], [0, -1], [0, 1]][random.integer(4)];
-      row = blockRow + dr; column = blockColumn + dc;
-    }
-    if (row < 0 || row >= GRID_HEIGHT || column < 0 || column >= GRID_WIDTH || mask[row][column]) continue;
-    mask[row][column] = true;
-    const open = GRID_WIDTH * GRID_HEIGHT - blocks - 1;
-    if (Math.max(...blockClusterSizes(mask)) > 3 || connectedOpenCells(mask) !== open) { mask[row][column] = false; continue; }
-    blocks += 1;
-  }
-  const oversizedArea = (): Array<[number, number]> | undefined => {
-    for (let row = 0; row <= GRID_HEIGHT - 2; row += 1) for (let column = 0; column <= GRID_WIDTH - 3; column += 1) {
-      const positions = Array.from({ length: 2 }, (_, dr) => Array.from({ length: 3 }, (__, dc) => [row + dr, column + dc] as [number, number])).flat();
-      if (positions.every(([cellRow, cellColumn]) => !mask[cellRow][cellColumn])) return positions;
-    }
-    for (let row = 0; row <= GRID_HEIGHT - 3; row += 1) for (let column = 0; column <= GRID_WIDTH - 2; column += 1) {
-      const positions = Array.from({ length: 3 }, (_, dr) => Array.from({ length: 2 }, (__, dc) => [row + dr, column + dc] as [number, number])).flat();
-      if (positions.every(([cellRow, cellColumn]) => !mask[cellRow][cellColumn])) return positions;
-    }
-    return undefined;
-  };
-  for (let repairs = 0; repairs < 100; repairs += 1) {
-    const area = oversizedArea();
-    if (!area) break;
-    let repaired = false;
-    for (const [row, column] of random.shuffle([...area])) {
-      mask[row][column] = true;
-      const open = GRID_WIDTH * GRID_HEIGHT - mask.flat().filter(Boolean).length;
-      if (Math.max(...blockClusterSizes(mask)) <= 3 && connectedOpenCells(mask) === open) { repaired = true; break; }
-      mask[row][column] = false;
-    }
-    if (!repaired) break;
-  }
-  return mask;
-}
+const REFLECTIONS = [[false, false], [true, false], [false, true], [true, true]] as const;
 
-export function generateBlockMask(random: SeededRandom, profile: LayoutProfile, availableByLength: ReadonlyMap<number, number>, iterations = 18_000, acceptsSlots?: (slots: LayoutSlot[]) => boolean): { mask: BlockMask; assessment: MaskScore } | null {
-  let mask = initialBlockMask(random, profile.targetBlocks);
-  const hardScore = (candidate: BlockMask) => {
-    const blocks = candidate.flat().filter(Boolean).length;
-    const open = GRID_WIDTH * GRID_HEIGHT - blocks;
-    const oversizedBlocks = blockClusterSizes(candidate).reduce((sum, size) => sum + Math.max(0, size - 3), 0);
-    const outsideBlocks = blocks < profile.blocks[0] ? profile.blocks[0] - blocks : blocks > profile.blocks[1] ? blocks - profile.blocks[1] : 0;
-    return countTwoCellRuns(candidate) * 100 + countOpenAreasLargerThanTwoByTwo(candidate) * 100
-      + oversizedBlocks * 200 + (open - connectedOpenCells(candidate)) * 200 + outsideBlocks * 50;
-  };
-  let geometryScore = hardScore(mask);
-  for (let iteration = 0; iteration < 24_000 && geometryScore > 0; iteration += 1) {
-    const blocks: Array<[number, number]> = [], open: Array<[number, number]> = [];
-    for (let row = 0; row < GRID_HEIGHT; row += 1) for (let column = 0; column < GRID_WIDTH; column += 1) (mask[row][column] ? blocks : open).push([row, column]);
-    const changes: Array<[number, number]> = random.next() < 0.85
-      ? [blocks[random.integer(blocks.length)], open[random.integer(open.length)]]
-      : [[random.integer(GRID_HEIGHT), random.integer(GRID_WIDTH)]];
-    for (const [row, column] of changes) mask[row][column] = !mask[row][column];
-    const candidateScore = hardScore(mask);
-    const temperature = Math.max(0.1, 20 * (1 - iteration / 24_000));
-    if (candidateScore <= geometryScore || random.next() < Math.exp((geometryScore - candidateScore) / temperature)) geometryScore = candidateScore;
-    else for (const [row, column] of changes) mask[row][column] = !mask[row][column];
+export function puzzleLayouts(
+  random: SeededRandom,
+  { theme, generationMode }: GenerationOptions,
+  availableByLength: ReadonlyMap<number, number>,
+) {
+  const groups = [{ profile: LAYOUT_PROFILES[generationMode], templates: LAYOUT_TEMPLATES[generationMode][theme] }];
+  if (generationMode === "booklet" && theme !== "general") {
+    groups[0].profile = LAYOUT_PROFILES.animalBooklet;
+    groups.push({ profile: LAYOUT_PROFILES.interactive, templates: LAYOUT_TEMPLATES.interactive[theme] });
   }
-  if (geometryScore > 0) return null;
-  let assessment = scoreBlockMask(mask, profile, availableByLength);
-  let bestMask = mask.map((row) => [...row]), best = assessment;
-  for (let iteration = 0; iteration < iterations; iteration += 1) {
-    const changes: Array<[number, number]> = [];
-    if (random.next() < 0.45) {
-      const blocks: Array<[number, number]> = [], open: Array<[number, number]> = [];
-      for (let row = 0; row < GRID_HEIGHT; row += 1) for (let column = 0; column < GRID_WIDTH; column += 1) (mask[row][column] ? blocks : open).push([row, column]);
-      changes.push(blocks[random.integer(blocks.length)], open[random.integer(open.length)]);
-    } else changes.push([random.integer(GRID_HEIGHT), random.integer(GRID_WIDTH)]);
-    for (const [row, column] of changes) mask[row][column] = !mask[row][column];
-    const candidate = scoreBlockMask(mask, profile, availableByLength);
-    const temperature = Math.max(0.05, 12 * (1 - iteration / iterations));
-    if (candidate.score <= assessment.score || random.next() < Math.exp((assessment.score - candidate.score) / temperature)) assessment = candidate;
-    else for (const [row, column] of changes) mask[row][column] = !mask[row][column];
-    if (assessment.score < best.score) { best = assessment; bestMask = mask.map((line) => [...line]); }
-    if (assessment.valid && iteration > 2_500 && (!acceptsSlots || acceptsSlots(assessment.slots))) return { mask: mask.map((line) => [...line]), assessment };
+  const maximum = groups.reduce((total, { templates }) => total + templates.length * REFLECTIONS.length * 2, 0);
+
+  function* layouts(): Generator<LayoutSlot[]> {
+    const seen = new Set<string>();
+    const isNew = (mask: BlockMask) => {
+      const key = mask.map((row) => row.map(Number).join("")).join("");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    };
+    for (const { profile, templates } of groups) {
+      for (const template of random.shuffle([...templates])) {
+        const rows = template.trim().split(/\s+/);
+        // The animal dictionaries fit the original orientation more often.
+        const reflections = theme === "general"
+          ? random.shuffle([...REFLECTIONS])
+          : [REFLECTIONS[0], ...random.shuffle(REFLECTIONS.slice(1))];
+        for (const [flipRows, flipColumns] of reflections) {
+          const mask = (flipRows ? [...rows].reverse() : rows).map((row) => {
+            const cells = Array.from(row, (cell) => cell === "#");
+            return flipColumns ? cells.reverse() : cells;
+          });
+          const base = assessBlockMask(mask, profile, availableByLength);
+          // Change a few blocks while keeping the layout constraints.
+          const variant = mask.map((row) => [...row]);
+          let assessment = base;
+          for (let edit = 0; edit < 10; edit += 1) {
+            const row = random.integer(GRID_HEIGHT), column = random.integer(GRID_WIDTH);
+            variant[row][column] = !variant[row][column];
+            const next = assessBlockMask(variant, profile, availableByLength);
+            if (next.valid) assessment = next;
+            else variant[row][column] = !variant[row][column];
+          }
+          if (assessment.valid && isNew(variant)) yield assessment.slots;
+          if (base.valid && isNew(mask)) yield base.slots;
+        }
+      }
+    }
   }
-  return best.valid && (!acceptsSlots || acceptsSlots(best.slots)) ? { mask: bestMask, assessment: best } : null;
+
+  return { maximum, layouts: layouts() };
 }
