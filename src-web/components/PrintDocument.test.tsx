@@ -1,8 +1,10 @@
-import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { cleanup, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 import type { PuzzleDocument } from "../types";
 import { PrintDocument } from "./PrintDocument";
 import { PrintablePuzzleGrid } from "./PrintablePuzzleGrid";
+
+afterEach(cleanup);
 
 const puzzle: PuzzleDocument = {
   schemaVersion: 4, generatorVersion: "web-3", lexiconVersion: "test", puzzleId: "abc", seed: "seed", difficulty: 2,
@@ -74,6 +76,40 @@ describe("PrintDocument", () => {
     const cover = container.querySelector(".cover") as HTMLElement;
 
     expect(within(cover).getByRole("heading", { name: expected })).toBeInTheDocument();
+  });
+
+  it.each([
+    { cover: true, letters: ["A", "B", "C"], keyLetters: [], mode: "booklet" },
+    { cover: false, letters: ["A", "A", "A", "B", "B", "C"], keyLetters: ["A", "B", "C"], mode: "single-puzzle print" },
+  ])("fills the givens for a $mode", ({ cover, letters, keyLetters }) => {
+    const grid = puzzle.grid.map((row) => [...row]);
+    grid[0].splice(0, 5, 1, 2, 1, 3, 2);
+    grid[1].splice(0, 2, 1, 4);
+    const printable: PuzzleDocument = {
+      ...puzzle,
+      grid,
+      givens: { 1: "A", 2: "B", 4: "C" },
+      solution: { ...puzzle.solution, codeToLetter: { 1: "A", 2: "B", 3: "D", 4: "C" } },
+    };
+    const job = { cover, puzzles: [printable] };
+    const { container, rerender } = render(<PrintDocument job={job} />);
+    const givenCells = () => Array.from(container.querySelectorAll(".puzzle-sheet [data-cell=open]"), (cell) =>
+      cell.querySelector(".print-letter")?.textContent ?? "");
+
+    const initialCells = givenCells();
+    expect(initialCells.filter(Boolean).sort()).toEqual(letters);
+    expect(initialCells[3]).toBe("");
+    expect(container.querySelectorAll(".puzzle-sheet .print-code")).toHaveLength(7);
+    expect(Array.from(container.querySelectorAll(".print-key strong:not(:empty)"), (cell) => cell.textContent)).toEqual(keyLetters);
+    expect(Array.from(container.querySelectorAll(".answers .print-letter"), (cell) => cell.textContent)).toEqual(["A", "B", "A", "D", "B", "A", "C"]);
+
+    rerender(<PrintDocument job={{ ...job, puzzles: [{ ...printable }] }} />);
+    expect(givenCells()).toEqual(initialCells);
+
+    if (cover) {
+      rerender(<PrintDocument job={{ ...job, puzzles: [{ ...printable, seed: "another-seed" }] }} />);
+      expect(givenCells().indexOf("A")).not.toBe(initialCells.indexOf("A"));
+    }
   });
 
   it("draws every cell with explicit SVG geometry", () => {

@@ -25,8 +25,8 @@ export function PrintDocument({ job }: { job: PrintJob | null }) {
     </section>}
     {job.puzzles.map((puzzle, index) => <section className="print-page puzzle-sheet" key={puzzle.puzzleId}>
       <header><div><p>Cijfercode</p><h1>Puzzel {index + 1}</h1></div><span>{difficultyName(puzzle.difficulty)} · {themeLabel(puzzle.theme)}{puzzle.requireEveryLetter ? " · A–Z" : ""}</span></header>
-      <PrintablePuzzleGrid puzzle={puzzle} />
-      <div className="print-key">{Array.from({ length: 26 }, (_, offset) => offset + 1).map((code) => <span key={code}><small>{code}</small><strong>{puzzle.givens[code] ?? ""}</strong></span>)}</div>
+      <PrintablePuzzleGrid puzzle={puzzle} oneCellPerGiven={job.cover} />
+      <div className="print-key">{Array.from({ length: 26 }, (_, offset) => offset + 1).map((code) => <span key={code}><small>{code}</small><strong>{job.cover ? null : puzzle.givens[code]}</strong></span>)}</div>
       <footer>{index + 1}</footer>
     </section>)}
     {answerPages.map((puzzles, page) => <section className="print-page answers" key={`answers-${page}`}>
