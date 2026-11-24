@@ -199,7 +199,7 @@ export async function generatePuzzle(difficulty: Difficulty, seed: string, lexic
     const allowed = candidates(lexicon, length, profile.minimumScore, options);
     solverWords.set(length, allowed);
     const available = new Set(allowed);
-    const limit = options.theme === "general" ? 1_200 : Number.POSITIVE_INFINITY;
+    const limit = options.theme === "general" ? 2_400 : Number.POSITIVE_INFINITY;
     wordsByLength.set(length, (source[String(length)] ?? [])
       .filter(([word]) => available.has(word))
       .filter(([word], index) => index < limit || (options.requireEveryLetter && /[QXY]/.test(word)))

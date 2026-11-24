@@ -21,6 +21,12 @@ from wordfreq import zipf_frequency
 
 NSR_URL = "https://www.gbif.org/dataset/4dd32523-a3a3-43b7-84df-4cda02f15cf7"
 
+# Some surnames in the full OpenTaal list escape detection in its base-word lists.
+ADDITIONAL_PROPER_NAMES = {"EVANS", "RICHARDS", "ROBERTS", "WILLIAMS"}
+
+# The species register can label English aliases as Dutch. GOUDVIS remains available.
+NON_DUTCH_ANIMAL_NAMES = {"GOLDFISH"}
+
 # `wordfreq` assigns 0 to names it has never observed. A score of 1.0 keeps the
 # relatively better-known part of the Naturalis vocabulary while leaving out the
 # thousands of names absent from general Dutch text. Frequency alone is not
@@ -101,7 +107,9 @@ def main() -> None:
         word for value in read_lines(arguments.unapproved)
         if value[:1].isupper() and (word := normalize(value)) and word not in approved and word in browser_words
     }
+    proper_only.update(ADDITIONAL_PROPER_NAMES & browser_words)
     animals, nsr_version = animal_words(arguments.nsr_archive)
+    animals -= NON_DUTCH_ANIMAL_NAMES
     alphabet = set("".join(animals))
     missing = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ") - alphabet
     if len(animals) < 250 or missing:
@@ -119,7 +127,7 @@ def main() -> None:
         )
 
     payload["properNames"] = sorted(proper_only)
-    payload["version"] = f"{payload['version'].split('+', 1)[0]}+nsr{nsr_version.replace('-', '')}-names1-animalsets3"
+    payload["version"] = f"{payload['version'].split('+', 1)[0]}+nsr{nsr_version.replace('-', '')}-names2-animalsets4"
     payload["themes"] = {
         "animals": {
             "sourceUrl": NSR_URL,

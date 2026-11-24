@@ -1,5 +1,6 @@
 import hashlib
 import json
+from pathlib import Path
 
 import pytest
 
@@ -44,6 +45,8 @@ def test_source_normalization_rejects_abbreviations_but_preserves_word_case():
         ("CMS", 3.04, 3.36, False),
         ("ANGELES", 4.13, 4.73, False),
         ("CUE", 2.70, 3.75, False),
+        ("GARDEN", 3.85, 4.77, True),
+        ("ROAD", 4.34, 5.24, False),
         ("DOVE", 3.65, 3.67, True),
         ("TACT", 2.86, 3.08, True),
         ("BEEN", 4.57, 6.27, True),
@@ -55,6 +58,21 @@ def test_source_normalization_rejects_abbreviations_but_preserves_word_case():
 )
 def test_puzzle_word_suitability(word, dutch, english, expected):
     assert is_suitable_puzzle_word(word, dutch, english) is expected
+
+
+def test_browser_lexicon_applies_reviewed_words_and_names():
+    path = Path(__file__).resolve().parents[1] / "public" / "lexicon.json"
+    lexicon = json.loads(path.read_text(encoding="utf-8"))
+    general = {word for rows in lexicon["words"].values() for word, _ in rows}
+    names = {"EVANS", "RICHARDS", "ROBERTS", "WILLIAMS"}
+    assert names <= general
+    assert names <= set(lexicon["properNames"])
+    assert "GARDEN" in general
+    assert general.isdisjoint({"PHILIPPINES", "RIVERS", "ROAD"})
+    for key in ("words", "familiarWords"):
+        animals = {word for rows in lexicon["themes"]["animals"][key].values() for word, _ in rows}
+        assert "GOLDFISH" not in animals
+        assert "GOUDVIS" in animals
 
 
 def test_sync_and_load_cache(monkeypatch, tmp_path):

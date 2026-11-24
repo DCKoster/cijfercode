@@ -39,7 +39,7 @@ def main() -> None:
 
     source_hash = lexicon.metadata.sha256
     payload = {
-        "version": f"opentaal-{source_hash[:12]}-top{WORDS_PER_LENGTH}-curated2",
+        "version": f"opentaal-{source_hash[:12]}-top{WORDS_PER_LENGTH}-curated3",
         "sourceUrl": lexicon.metadata.source_url,
         "generatedAt": datetime.now(UTC).isoformat(),
         "words": words,
