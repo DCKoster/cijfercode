@@ -86,7 +86,7 @@ export function Player({ puzzle, saved, onSave, onPrint }: { puzzle: PuzzleDocum
   };
 
   return <section className="player card">
-    <div className="puzzle-heading"><p className="eyebrow">Niveau {puzzle.difficulty} · {themeLabel(puzzle.theme)}{puzzle.requireEveryLetter ? " · Volledig alfabet" : ""}</p><button className="text-button" onClick={onPrint}>Afdrukken</button></div>
+    <div className="puzzle-heading"><p className="eyebrow">{themeLabel(puzzle.theme)}{puzzle.requireEveryLetter ? " · Volledig alfabet" : ""}</p><button className="text-button" onClick={onPrint}>Afdrukken</button></div>
     <p className="instructions">Selecteer een vakje en typ een letter. De letter verschijnt automatisch bij dezelfde code.</p>
     <label className="mobile-letter-entry">Letter voor code {selected ?? "–"}<input ref={letterInput} type="text" inputMode="text" maxLength={1} value="" autoCapitalize="characters" autoComplete="off" spellCheck={false} aria-label={`Letter voor code ${selected ?? "–"}`} onChange={(event) => assignLetter(event.target.value)} onKeyDown={(event) => {
       if (event.key !== "Backspace" && event.key !== "Delete") return;
